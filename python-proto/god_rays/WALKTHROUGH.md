@@ -272,28 +272,174 @@ fight each other is a UI bug, not a feature.
 
 ---
 
-## Where step 1 stops, and what comes next
+# Step 2 — Shimmer, and a theorem that makes it free
 
-Step 1 is one centre, white light, and a bright pass. Planned:
+`gr_step2_shimmer.py`. Run it the same two ways.
 
-- **step 2 — shimmer and the source mask.** Real Shine lets the rays come from
-  something other than a luma threshold (an alpha channel, a matte layer), and
-  adds angular noise so the shafts aren't perfectly clean. The noise is the
-  interesting part: it has to be *radial* noise, indexed by angle about C, or it
-  breaks the composition property that makes the sweep fast.
-- **step 3 — colour.** Star Glint's band decomposition applies unchanged: the
-  doubling tables slice into distance bands, each tinted from a ramp LUT, and
-  Gradient Map's `build_lut` gets imported for the third time. The one new
-  question is whether bands should be geometric in `r^t` (they naturally are —
-  the geometric step means *uniform* band edges are already geometric in
-  distance, which may make this cheaper here than in Star Glint).
-- **step 4 — performance + AE realities.** Resolution independence (`reach` is a
-  fraction, so it may already be free — verify, don't assume), alpha as a fourth
-  channel, downsampling, and the `1/r^2` exposure question from above.
+Step 1's shafts are perfectly clean. Real light shafts are not — dust and haze
+break them into a rake of brighter and darker rays, and this is the single
+control that most separates "a radial blur" from "god rays". Compare
+`out_gr2_clean.png` with `out_gr2_dusty.png`.
+
+The obvious implementation is one line: multiply the bright buffer by some noise
+before sweeping. That works. Measuring it turned up something better.
+
+## The observation
+
+A scale about C preserves **angle** about C — exactly, not approximately:
+
+```
+p' = C + (p - C) * r      =>      atan2(p' - C) == atan2(p - C)
+```
+
+Scaling slides a point along the ray it is already on; it cannot move it to a
+different ray. This is the same fact that made step 1 fast, seen from the other
+side: **the sweep never mixes rays.** Check (a) confirms it to `2.4e-07` rad,
+which is float32 and nothing else.
+
+## The consequence
+
+The sweep at pixel `p` reads only the points `C + (p-C)·r^t` — every one of which
+has the *same* angle `θ(p)`. So for any `m` that is a function of angle alone:
+
+```
+sweep(bright · m)(p) = sum_t decay^t · m(θ) · bright(...)
+                     = m(θ) · sum_t decay^t · bright(...)
+                     = m(θ) · sweep(bright)(p)
+```
+
+**Angular modulation commutes with the sweep.** Apply the shimmer *after* the
+sweep — one multiply over the frame — instead of before it. Same picture.
+
+Three things follow:
+
+1. **The noise is never resampled**, so it stays sharp. The pre-sweep version
+   drags the noise through 8 bilinear passes.
+2. **Phase becomes cheap to animate.** Changing Shimmer Phase does not
+   invalidate the swept buffer. Check (f) measures it at 1920×1080: full sweep
+   **2977 ms**, phase-only re-apply **438 ms** — 6.8×. In AE that is the
+   difference between a cached render and a full recompute per frame.
+3. **It is a check.** Two independent code paths that must agree, and the gap
+   between them is a direct measurement of how much the bilinear sampler leaks
+   light between neighbouring rays.
+
+That third point is the reason the "rejected" implementation stays in the file.
+`rays_pre` is not dead code — it is the reference that makes `rays_post`
+trustworthy, the same role `streak_arm_slow` plays in step 1.
+
+## The prediction that was half wrong
+
+Check (b) came with a prediction written before it ran: *error grows with
+Detail, because finer rays sit closer together and leak into each other more.*
+
+```
+detail= 4.0   rel peak = 9.9e-02   rel mean = 8.6e-03
+detail=14.0   rel peak = 9.7e-03   rel mean = 1.2e-02
+detail=40.0   rel peak = 8.2e-03   rel mean = 2.9e-02
+```
+
+The **mean** does exactly that, 0.9% → 2.9%. The **peak** does the opposite,
+9.9% → 0.8%. Both numbers are correct and they measure different things: at low
+Detail the field is a few broad lobes with steep walls, and the worst single
+pixel sits on a wall, not on fine-ray crosstalk. Two mechanisms; only one of them
+was predicted.
+
+Both are printed rather than picking the column that agreed. This is the fourth
+time in this project that a check has come back with a number the docstring did
+not expect, and it is getting to be the point of writing them.
+
+## The two constraints on the noise
+
+Neither is a taste call; both are forced.
+
+### 1. Periodic in θ with period 2π
+
+Sample any ordinary 1D noise over `[-π, π]` and there is a discontinuity along
+the `-π/+π` ray — one permanently wrong shaft, in a fixed screen direction, that
+no amount of seed-shopping removes. A Fourier series with **integer**
+frequencies is exactly periodic by construction, which is why `shimmer_field` is
+built from cosines rather than from value noise or Perlin.
+
+Check (c) evaluates the field either side of the seam, and — because a check
+that only ever sees correct code proves nothing (Star Glint step 2b's lesson) —
+runs a deliberately broken non-integer frequency beside it:
+
+```
+detail= 7.0   gap = 3.1e-06
+detail=14.0   gap = 7.3e-06
+detail=33.0   gap = 1.3e-05
+[note] non-integer k=14.5:  gap = 1.03e+00   <- the seam the integers avoid
+```
+
+Octaves are integer multiples for the same reason, and give the field a fractal
+feel — a few broad rays with finer structure inside them, which is what dust in
+air actually looks like.
+
+### 2. Faded out near C
+
+Angular frequency measured in *pixels* is `k / radius`. At radius 3 a 32-cycle
+shimmer is asking for ten cycles per pixel: it aliases into a hard, crawling
+starburst sitting right on the source point. This is the single worst artefact in
+the effect and it only appears when the centre is inside the frame — so it is
+exactly the kind of thing that ships.
+
+The fix is computable, not eyeballed. One pixel of arc at radius `R` subtends
+`1/R` radians, so local frequency is `k_max / (2πR)` cycles/pixel; Nyquist at
+0.5 gives `R = k_max / π`. `radial_fade` ramps the shimmer to 1.0 inside that
+radius. Check (d):
+
+```
+unfaded  peak-to-peak inside r<50.9px = 1.1879
+faded    peak-to-peak inside r<50.9px = 0.0000
+```
+
+## What check (e) is for
+
+`amount=0` must give back step 1 **exactly** — asserted as `== 0.0`, not as a
+tolerance. Any style control you cannot switch off is not a style control; same
+rule as Star Glint step 2b. And seeds must be deterministic *and* actually do
+something: same seed identical, different seed different. The second half
+matters, or a Seed control that did nothing would pass.
+
+## Try this
+
+1. `--explain` writes `explain2_0_field.png` (raw) and `explain2_1_mask.png`
+   (faded). The difference between them is the whole of constraint 2.
+2. Set `octaves=1` in `shimmer_mask`. The rays become a clean sinusoidal comb —
+   obviously artificial. Then note that `shimmer_field` divides by `sum(amps)`,
+   and work out what would drift if it did not.
+3. In `harmonics`, drop the `int(round(...))`. Render at `detail=14.3` and find
+   the seam. It is always in the same screen direction, which is the tell.
+4. Delete `radial_fade` from `shimmer_mask` and render `detail=34`. Look at the
+   sun. Then animate Phase and imagine that crawling.
+5. Swap `rays_post` for `rays_pre` in the render loop. The images are nearly
+   identical — that is the theorem. Now diff them and find where they are not:
+   the disagreement is concentrated where rays are closest together.
+6. Predict, then check: does Shimmer change the *total* light in the frame? Look
+   at what `tail_only` is normalising by in the render loop and why the mask is
+   passed into it.
+
+---
+
+## Where step 2 stops, and what comes next
+
+- **step 3 — colour.** Star Glint's band decomposition applies: the doubling
+  tables slice into distance bands, each tinted from a ramp LUT, and Gradient
+  Map's `build_lut` gets imported for the third time. One thing to check early:
+  because the step here is already geometric, *uniform* band edges in `t` are
+  already geometric in distance — which is the spacing Star Glint had to
+  discover the hard way. This may be cheaper here than it was there.
+- **step 4 — controls, performance, and AE realities.** Source-mask modes
+  (luma / alpha / matte) live here alongside alpha as a fourth channel.
+  Resolution independence needs verifying rather than assuming: `reach` is a
+  *fraction*, so it may already be free — but `detail` and the Nyquist fade are
+  in pixels and certainly are not. Also the `1/r²` exposure question from step 1,
+  and a LUT over θ for the shimmer mask (check (f) shows the mask build is 438 ms
+  at 1080p, which is not nothing).
 - **step 5 — C++.** SmartFX with output buffer expansion, since shafts leave the
   layer bounds. Then the CUDA/Metal port, where the ping-pong shape pays off.
 
 Reused wholesale from work already shipped: Bloom's linear-light spine and
 bright pass, Star Glint's geometric doubling and grid cache, Gradient Map's ramp
-LUT (step 3). The only genuinely new idea in the whole effect is the
-translation→scale rewrite above — and step 1 already proves it.
+LUT (step 3). The genuinely new ideas are the translation→scale rewrite (step 1)
+and the angular-commutation theorem (step 2) — and both are proved, not asserted.
