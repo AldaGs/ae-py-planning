@@ -317,8 +317,16 @@ Three things follow:
    drags the noise through 8 bilinear passes.
 2. **Phase becomes cheap to animate.** Changing Shimmer Phase does not
    invalidate the swept buffer. Check (f) measures it at 1920×1080: full sweep
-   **2977 ms**, phase-only re-apply **438 ms** — 6.8×. In AE that is the
+   **239 ms**, phase-only re-apply **106 ms** — 2.2×. In AE that is the
    difference between a cached render and a full recompute per frame.
+
+   *Those numbers are the second set.* The first version of check (f) timed one
+   cold call each and reported **2977 ms / 438 ms / 6.8×**. None of it
+   reproduced — with the grid cache cold and the 1080p buffers being touched
+   for the first time, it was measuring allocation and page faults, not the
+   algorithm. The check now warms up and takes the best of three. A single
+   timing run is not a measurement, and the 6.8× went on to cause real damage
+   in step 4 before it was caught — see there.
 3. **It is a check.** Two independent code paths that must agree, and the gap
    between them is a direct measurement of how much the bilinear sampler leaks
    light between neighbouring rays.
@@ -589,18 +597,246 @@ now the third algorithm that single substitution has carried across.
 
 ---
 
-## Where step 3 stops, and what comes next
+# Step 4 — Controls, performance, and the things AE will demand
 
-- **step 4 — controls, performance, and AE realities.** Source-mask modes
-  (luma / alpha / matte) alongside alpha as a fourth channel. Resolution
-  independence needs *verifying*, not assuming: `reach` and the radial ramp are
-  fractions and may already be free, but `detail` and the Nyquist fade are in
-  pixels and certainly are not. Plus the `1/r^2` exposure question from step 1,
-  a LUT over theta for the shimmer mask (step 2 check (f): the mask build is
-  438 ms at 1080p), and a profiler run before optimising anything - Star Glint
-  step 4's actual lesson.
-- **step 5 — C++.** SmartFX with output buffer expansion, since shafts leave the
-  layer bounds. Then the CUDA/Metal port, where the ping-pong shape pays off.
+`gr_step4_controls.py`. Three jobs: make the parameter set real, make it fast,
+and make it survive contact with After Effects.
+
+```bash
+python gr_step4_controls.py --explain cathedral
+```
+dumps the whole parameter block grouped the way the AE UI will group it, plus
+the derived scalars and the fade radius, and renders that preset.
+
+## Profile first. Then read what the profile says — including about you.
+
+Star Glint step 4's lesson was "profile before optimising": it had a confident
+note in step 2 naming `lateral_blur` as the bottleneck, and the profiler found
+that thing was 2% of the cost.
+
+This step managed to make the *same class* of mistake anyway, in a new way, and
+the sequence is worth following because the trap was well hidden.
+
+Step 2's check (f) reported the shimmer mask at **438 ms** at 1080p. That is a
+big number, so step 4 opened by building a θ-LUT to kill it. Then the profile
+ran:
+
+```
+bright_pass4                   41.2 ms
+ray_sweep (the sweep)         306.8 ms
+shimmer_mask  step 2           84.9 ms
+shimmer_mask_lut warm          53.6 ms
+colorize_radial                46.9 ms
+colorize_march 16 bands      2060.6 ms
+```
+
+Two things wrong at once:
+
+1. **The mask was never 438 ms.** It is 85 ms. Step 2's check timed one cold
+   call and was measuring first-touch allocation. Both step 2's check and this
+   one now warm up and take the best of three, and step 2's walkthrough number
+   is corrected.
+2. **Even at 85 ms it was not the bottleneck** — it is 12% of a radial-mode
+   render, against the sweep's 68%. The LUT buys 1.6×, i.e. about 3% of the
+   frame time.
+
+So: an optimisation was written for a stage that was neither as slow as claimed
+nor important. The LUT stays — it is correct, it is free at runtime, and the
+reasoning behind it (the field is a function of one variable, *because* of step
+2's theorem) is worth having written down. But it is documented as what it is.
+
+Star Glint's lesson was "profile before optimising". The sharper version, learned
+here: **profile before optimising, and don't trust a number just because you
+measured it yourself.** The bad 438 ms was in this project's own walkthrough,
+carrying full authority, for three steps.
+
+The profile also priced the one thing that *is* expensive: **MARCH colour costs
+6.7× a plain sweep.** That is the honest price of step 3's banded mode, and it is
+why RADIAL is the default.
+
+## The LUT had a bug the check caught
+
+First version snapped to the nearest table entry. Check (b):
+
+```
+detail= 6.0   max|lut-exact| = 5.28e-03
+detail=14.0   max|lut-exact| = 1.23e-02
+detail=40.0   max|lut-exact| = 3.52e-02
+```
+
+Nearest-neighbour error is **first order** in the step size, so it scales as
+`amount · k_max · h` — and it got worse with Detail exactly as that predicts. The
+instinct is to grow the table. The fix is to interpolate: second order, same
+table, `~1e-4`. A bigger table would have been the expensive way to fix a mistake
+in the reader.
+
+## Resolution independence: the dividend of writing everything as a ratio
+
+AE renders previews at Half/Third/Quarter and hands the effect a smaller buffer
+plus a downsample factor. Star Glint had to multiply *every* length-like control
+by `res_scale`, because its Length was in pixels. Here:
+
+| control | unit | needs scaling? |
+|---|---|---|
+| reach | fraction of the way to C | no |
+| falloff | dimming ratio | no |
+| centre | normalised 0..1 | no |
+| detail | cycles per **turn** (angular) | no |
+| ramp `u` | normalised by farthest corner | no |
+| samples | quality knob | no (that was step 1) |
+| shimmer fade radius | **buffer pixels** | see below |
+
+Six of seven, free. That is not luck — the geometric formulation made fractions
+the natural unit, and steps 1–3 kept picking them for other reasons.
+
+Check (d) measures it: a half-size buffer matches the full render to **4.0e-02**
+with `res_scale` applied nowhere at all.
+
+And a check that cannot fail proves nothing, so the second half of (d) builds the
+bug on purpose — re-expresses `reach` as an absolute pixel distance, Star
+Glint-style, and forgets to scale it:
+
+```
+a pixel-valued Reach, unscaled : rel err = 1.384e+00   <- the bug
+the same, scaled by res_scale  : rel err = 3.970e-02
+```
+
+35× worse. Pixel units really do break; ratios really don't.
+
+### The seventh control, and an honest "you cannot have both"
+
+The shimmer fade radius is in buffer pixels, and at reduced resolution two
+demands conflict:
+
+- **anti-aliasing** wants at least `k_max/π` *buffer* pixels, or the shimmer
+  aliases into a crawling starburst on the source point;
+- **matching the look** wants `(k_max/π)·res_scale` buffer pixels, so the preview
+  shows the same-sized clean core as the final render.
+
+For `res_scale < 1` the second is always smaller. They cannot both be satisfied.
+`fade_radius` takes the max — correctness first — and accepts that a Quarter-res
+preview shows a slightly larger clean core than the final. The alternative is a
+preview that aliases, which is worse.
+
+The consequence, stated plainly in the code because someone will otherwise file a
+bug about it: **since `res_scale ≤ 1` always, the max is always the Nyquist term,
+so `res_scale` is inert in this effect.** It stays in the signature because that
+is where a reader will look for it.
+
+## Alpha, and an assertion imported from the wrong effect
+
+Alpha rides as a fourth channel and is swept identically. The first version of
+check (c) asserted, copied straight from Star Glint, that *a transparent region
+stays exactly zero*. It failed at `5.5e-01`.
+
+The code was right and the check was wrong. **Rays are light, and light must be
+able to travel into an empty region** — a shaft crossing a hole in the layer is
+the entire point. Star Glint's assertion was about a wholly empty *input*, which
+is a different claim. Restated, both halves now hold:
+
+- a wholly empty input gives **exactly** zero out — no glow from nothing;
+- **zero** lit-but-transparent pixels — the sweep never brightens a pixel it does
+  not also make more opaque, or the result cannot composite over anything.
+
+And the region case is reported as a `[note]` rather than a check: rgb rises to
+0.554 there and alpha to 0.533. What matters is that the two rise *together*.
+
+That is the third assertion inherited from Star Glint that turned out not to
+apply — after geometric band edges and the double-resample fold, both in step 3.
+
+## The open question from step 1, closed properly
+
+Steps 1 and 3 both guessed that Star Glint's lateral blur — which equalised arm
+width between on-axis and diagonal arms — would be unnecessary here, on the
+grounds that `zoom`'s composition error is 40× smaller than `shift`'s. Step 1
+even wrote "you probably don't need it here", hedged as a thing to check.
+
+Check (f) checked. With a **point** source:
+
+```
+  0:0.0028   10:0.0047   22:0.0047   30:0.0044
+ 45:0.0047   60:0.0044   75:0.0047   90:0.0028      spread = 1.66x
+```
+
+The defect is *present*, with exactly Star Glint's signature — 0° and 90° sharp,
+everything else ~1.7× wider. Weaker than its 2.84×, but not absent. "Closed, no
+blur needed" would have been the wrong call.
+
+The right question was not *is it there* but *does it matter*. Star Glint's
+sources were points, so a 1px hairline was the whole arm. This effect's sources
+are **areas** — that was step 1's subject lesson, the one that cost two failed
+test images. Repeat the measurement with a disc of radius 5:
+
+```
+  0:0.0175   10:0.0168   22:0.0172   30:0.0167
+ 45:0.0169   60:0.0167   75:0.0173   90:0.0175      spread = 1.05x
+```
+
+Gone. The sampler defect is real and is swamped by the source's own width the
+moment the source is bigger than a pixel — and here it always is, because the
+bright pass keeps ~30% of the frame. **No lateral blur**, and now for a reason
+rather than a hunch.
+
+## Downsampling, and the exposure question
+
+```
+downsample=1     83.4 ms   peak err vs full = 0.000
+downsample=2     36.0 ms   peak err vs full = 0.012
+downsample=4     25.5 ms   peak err vs full = 0.018
+```
+
+2.3× for 1.2% peak error. Compare Star Glint, where half res cost **22%** peak
+error — its streaks were thin high-contrast hairlines and downsampling destroyed
+them. God-ray shafts are broad and low-frequency, so this is nearly free. Same
+control, an order of magnitude different price, for the same structural reason
+that killed the lateral blur.
+
+Step 1 deferred the `1/r²` exposure question with "long reach blows out". Check
+(g) settles it:
+
+```
+ reach    peak tail    mean tail
+  0.20       11.549       0.2364
+  0.90       11.548       0.5740
+```
+
+The **peak** is flat — it sits on the sun, which the sweep barely moves. The
+**mean** grows 2.4×. So what blows out is the frame average, not the highlight:
+a different problem with a different fix from the one step 1 assumed. The growth
+is real light (a wider shaft collects more), so it is not normalised away — it
+ships as documented behaviour with Intensity as the knob.
+
+## Try this
+
+1. `--explain cathedral` then `--explain march`. Diff the derived block: which
+   numbers move, and which are the same because they are ratios?
+2. In `shimmer_mask_lut`, go back to nearest-neighbour indexing and re-run check
+   (b). Then instead of interpolating, try quadrupling `n`. Compare what each
+   buys per byte.
+3. Run check (a) twice in one session. The numbers should now be stable. Then
+   delete the warm-up call and run it twice more.
+4. Set `color_mode="march"` and time a render. 6.7× is the price of step 3's
+   banded ramp — decide for yourself whether that mode earns its place.
+5. In check (f), change the disc radius from 5 to 1. Find the radius at which the
+   angular spread crosses back over 1.15×. That number is how big a source has to
+   be before the lateral blur stops mattering.
+6. Render `preview` (`res_scale=0.5`) and confirm nothing changes, then read
+   `fade_radius`'s docstring and work out why that is the correct outcome rather
+   than a broken parameter.
+
+---
+
+## Where the Python plan stops
+
+Steps 1-4 are done and the effect is feature-complete as a prototype: radial
+sweep, shimmer, three colour modes, source modes, alpha, resolution
+independence, downsampling.
+
+- **step 5 - C++.** SmartFX with output buffer expansion, since shafts leave the
+  layer bounds. Then the CUDA/Metal port, where the ping-pong shape pays off:
+  every pass in this effect is "resample the frame with one affine map, multiply
+  by a scalar, add", which is the same GPU shape as Bloom's pyramid, Star
+  Glint's arms and Buildable Stroke's JFA.
 
 Reused wholesale from work already shipped: Bloom's linear-light spine and
 bright pass, Star Glint's geometric doubling, grid cache and band stitch,
@@ -608,15 +844,32 @@ Gradient Map's ramp LUT. The genuinely new ideas are the translation->scale
 rewrite (step 1) and the angular-commutation theorem (step 2, confirmed from the
 other side in step 3) - and all of them are proved, not asserted.
 
-The running theme, three steps in: **Star Glint's tools all transfer and its
-corrections mostly do not.** Geometric band spacing and the double-resample fold
-were each a fix for a failure mode that turns out not to exist here, and both
-were caught only because the check was written as a measurement rather than an
-assertion. Its dispersive-mode conclusion did carry over unchanged.
+---
 
-One Star Glint correction is still **untested** here: the lateral blur that
-equalised arm width across angles. Step 1 guessed it would be unnecessary
-(zoom's composition error is 40x smaller) and step 2 did not get to it. Treat
-that as an open question for step 4, not as a third data point - the whole
-lesson of this step is that the guess and the measurement disagree more often
-than not.
+## The one thing to take from this effect
+
+**Star Glint's tools all transferred. Almost none of its corrections did.**
+
+| Star Glint correction | here |
+|---|---|
+| geometric band edges | uniform-t wins, by 28x at 4 bands (step 3) |
+| never resample twice | no measurable penalty (step 3) |
+| lateral blur for arm width | defect real but swamped by source size (step 4) |
+| transparent region stays zero | wrong claim - light must cross holes (step 4) |
+| scale every length by res_scale | six of seven controls are ratios (step 4) |
+| dispersive is a cheap mode, not the general one | transferred unchanged (step 3) |
+
+One out of six. A cross-effect technique map tells you which *tools* transfer; it
+cannot tell you which *corrections* do, because a correction is a fix for a
+specific failure mode and the failure mode may simply not be present.
+
+Every one of those was caught the same way: by writing the check as a
+**measurement** rather than an assertion, and by pairing it with a deliberately
+broken control so it could not pass for the wrong reason. Where a check did fail,
+it was usually the reference or the metric at fault, not the code - step 3's hue
+metric and step 4's alpha assertion both looked like bugs and were not.
+
+And the reverse failure happened too: step 2 shipped a timing number that was
+never real, this walkthrough repeated it with full authority for three steps, and
+step 4 wrote an optimisation for it before the profiler caught on. Measure, but
+do not trust a measurement just because it is yours.

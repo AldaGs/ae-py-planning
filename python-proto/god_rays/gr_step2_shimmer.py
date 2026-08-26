@@ -254,6 +254,13 @@ def explain(reach=0.45, falloff=0.06, samples=128, threshold=0.9, knee=0.3,
 #  main
 # ===========================================================================
 
+def _timed(fn):
+    """Wall time of one call, in seconds. Used only by the timing checks."""
+    t0 = time.time()
+    fn()
+    return time.time() - t0
+
+
 def main():
     ok = True
 
@@ -358,16 +365,28 @@ def main():
     print(f"  [{'ok  ' if diff else 'FAIL'}] different seed -> different")
 
     print("\n=== (f) cost: post-multiply vs re-sweeping for a Phase change ===")
+    # WARM UP, then take the best of several runs. The first version of this
+    # check timed one cold call each and reported 2977 ms / 438 ms / 6.8x. None
+    # of those numbers reproduced: with the grid cache cold and the 1080p
+    # buffers being touched for the first time, it was measuring allocation and
+    # page faults, not the algorithm. A single timing run is not a measurement.
     big = bright_pass(synthetic_sun(1080, 1920)[0], 0.9, 0.3)
     BH, BW = big.shape[:2]
     bcx, bcy = BW * 0.32, BH * 0.30
-    t0 = time.time(); swept = ray_sweep(big, bcx, bcy, 128, r, d)
-    t_sweep = time.time() - t0
-    t0 = time.time()
-    mk = shimmer_mask(BH, BW, bcx, bcy, 14.0, 0.7, 0.4, 3)
-    _ = swept * mk[..., None]
-    t_phase = time.time() - t0
-    print(f"  1920x1080:  full sweep {t_sweep*1e3:7.1f} ms   "
+
+    def best(fn, n=3):
+        fn()                                   # warm-up, discarded
+        return min(_timed(fn) for _ in range(n))
+
+    swept = ray_sweep(big, bcx, bcy, 128, r, d)
+    t_sweep = best(lambda: ray_sweep(big, bcx, bcy, 128, r, d))
+
+    def phase_only():
+        mk = shimmer_mask(BH, BW, bcx, bcy, 14.0, 0.7, 0.4, 3)
+        return swept * mk[..., None]
+
+    t_phase = best(phase_only)
+    print(f"  1920x1080 (best of 3, warmed):  full sweep {t_sweep*1e3:7.1f} ms   "
           f"phase-only re-apply {t_phase*1e3:6.1f} ms   "
           f"({t_sweep/max(t_phase,1e-6):.1f}x)")
 
