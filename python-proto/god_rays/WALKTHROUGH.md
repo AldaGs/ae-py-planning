@@ -421,25 +421,202 @@ matters, or a Seed control that did nothing would pass.
 
 ---
 
-## Where step 2 stops, and what comes next
+# Step 3 — Colour, and which of the two ramps is actually free
 
-- **step 3 — colour.** Star Glint's band decomposition applies: the doubling
-  tables slice into distance bands, each tinted from a ramp LUT, and Gradient
-  Map's `build_lut` gets imported for the third time. One thing to check early:
-  because the step here is already geometric, *uniform* band edges in `t` are
-  already geometric in distance — which is the spacing Star Glint had to
-  discover the hard way. This may be cheaper here than it was there.
+`gr_step3_color.py`. Run it the same two ways.
+
+There are two completely different things "a ray colour ramp" can mean. They look
+similar in a still and they cost wildly different amounts:
+
+- **RADIAL** — colour indexed by the pixel's own distance from the source.
+  *"the shaft is gold near the sun and blue out at the edges"*
+- **MARCH** — colour indexed by how far the light travelled to get here.
+  *"each contribution is tinted by its own path length"*
+
+## Step 2's theorem, run backwards
+
+Step 2 established that a scale about C preserves **angle**, so angle-only
+modulation commutes with the sweep. Radius is the other half of that coordinate
+system and it behaves the exact opposite way: a scale about C *changes* radius —
+that is all it does. So:
+
+| modulation | commutes? | consequence |
+|---|---|---|
+| angular | yes | before or after the sweep is the same picture |
+| radial | **no** | before and after are two different **looks** |
+
+That is not a bug to fix. Pre-multiplying tints the *source light* by where it
+came from; post-multiplying tints the *shaft* by where it landed. Both are
+legitimate; we ship post, because it is what the control name implies and it is
+one multiply.
+
+**And that is the punchline: the radial ramp is exact and free.** No bands, no
+approximation, one multiply over the frame. Star Glint needed a 16-band
+decomposition to get a coloured streak, because its distance coordinate *was* the
+march index. Here the distance coordinate the artist cares about is screen
+radius, which is sitting right there.
+
+## The check that was measuring the wrong quantity
+
+First version of check (d) compared raw pixel values, normalised by the global
+max, and reported `4.8e-03` — which reads as "radial commutes too". It does not.
+The metric was wrong: **the peak of both buffers is the sun**, where `u ≈ 0` and
+the ramp agrees by construction, so a max-over-global-max metric is dominated by
+the one region that *cannot* differ.
+
+What actually differs is hue. Measuring hue (normalised rgb over lit pixels only)
+— and measuring the angular case the same way as a control, so the number has
+something to be large compared to:
+
+```
+radial  ramp, pre vs post: mean hue gap = 0.01747
+angular ramp, pre vs post: mean hue gap = 0.00017   (104x smaller)
+```
+
+There it is. Step 2's theorem confirmed from the other direction, at 104×.
+
+Fifth time now: a check reported a real number and the *metric*, not the code,
+was at fault. The habit that keeps catching it is asking "what would this number
+look like if the feature were broken?" — if the answer is "about the same", the
+metric is not measuring the feature.
+
+## Two Star Glint lessons, and neither of them transfers
+
+This was the surprise of the step. Both were written into the file as
+expectations, and both were wrong.
+
+### Lesson 1: band edges must be geometric — **not here**
+
+Star Glint discovered its band edges had to be spaced geometrically: its samples
+sat at linearly-spaced distances while the weights were geometric, so linear
+bands wasted resolution out in the faint tip. Its table had geometric ~3× better
+at every band count.
+
+Here the samples are **already** at geometrically-spaced radii (`r^t`), so uniform
+spacing in `t` is already geometric in distance. Prediction: the correction buys
+nothing. Check (b):
+
+```
+ bands    uniform-t   geometric-t
+     4   6.2303e-03    1.7187e-01
+     8   4.0820e-03    1.9067e-02
+    16   2.8633e-03    2.9728e-03
+    32   1.8416e-03    2.7998e-03
+    64   1.4722e-03    2.0421e-03
+```
+
+Uniform wins at every count, and at 4 bands it wins by **28×** — applying Star
+Glint's fix here would have made the effect dramatically worse at low band
+counts. The two effects need opposite spacing for the same underlying reason.
+
+Also worth noting: **16 uniform bands lands at 0.3%**, where Star Glint's 16
+geometric bands landed at 2.7%. Colour is nearly ten times cheaper to approximate
+in this effect.
+
+### Lesson 2: never resample twice — **no measurable penalty here**
+
+Star Glint found the obvious band formulation, `decay^a · shift(prefix(b-a), a·d)`,
+disagreed with its plain sweep by 6%, because it resamples twice and
+`shift(shift(X,u),v) ≠ shift(X,u+v)`. Check (a2) was written expecting to confirm
+the same for `zoom`:
+
+```
+one resample per block: peak 1.848365e-03  mean 2.704650e-03
+the obvious way     : peak 1.848365e-03  mean 2.704643e-03
+the two formulations differ by rel 1.46e-07 - i.e. not at all.
+```
+
+Identical to seven significant figures. This is consistent with step 1's check
+(b) — `zoom`'s composition error is ~40× smaller than `shift`'s — so the second
+resample genuinely costs nothing.
+
+The fold still ships, because it is no worse and one resample is one resample.
+But the *reason* Star Glint shipped it does not apply, and check (a2) was
+rewritten from "assert the fold is better" into "measure whether it is". A check
+that asserts an ordering the data does not support is a check that will fail
+every time someone runs it correctly.
+
+**The general lesson across both:** a technique map like the syllabus'
+cross-effect table tells you which *tools* transfer. It does not tell you which
+*corrections* transfer, because a correction is a fix for a specific failure mode,
+and the failure mode may simply not be present. Both of these would have shipped
+unmeasured if the checks had been written as assertions instead of measurements.
+
+## Dispersive: the free mode, and its ceiling
+
+`ray_sweep_dispersive` gives R, G and B their own falloff. Colour then shifts
+along the march at *zero* extra cost — no bands, no approximation — and it is what
+real atmospheric extinction does (blue scatters out first, which is why sunbeams
+go red). See `out_gr3_dispersive.png`.
+
+The catch is stated as a measurement rather than a caveat. Check (e) computes the
+chromatic variety each mode can span:
+
+```
+banded rainbow ramp : 0.0761
+dispersive          : 0.0499
+```
+
+Dispersion can only ever produce one monotonic shift. You cannot express "white,
+then gold, then magenta". It ships as a cheap mode, not as the general control —
+same conclusion Star Glint reached about its own dispersive path, and the one
+place in this step where the earlier effect's finding *did* carry over.
+
+## Reuse
+
+`build_lut` is Gradient Map's, imported unchanged — the **third** effect to do so.
+`band()` is Star Glint step 3's stitch with `shift` swapped for `zoom`, which is
+now the third algorithm that single substitution has carried across.
+
+## Try this
+
+1. `--explain` prints the band table: `a`, `b`, the centroid ramp position, and
+   `r^a`/`r^b` — the actual radius fraction each band covers. Watch the radius
+   fractions come out geometric from uniform `t`. That is lesson 1, in one column.
+2. Render `radial` and `march` with the same ramp (`out_gr3_radial_sunset.png`
+   vs `out_gr3_march_sunset.png`). Predict first which one has visible colour out
+   at the frame edges, and why.
+3. Swap `band_edges_uniform` for `band_edges_geometric` at `bands=4` and look at
+   the render, not the number. 28× worse is visible.
+4. In `band_u`, return the band midpoint instead of the energy-weighted centroid.
+   Predict the direction of the change in check (b) before running it.
+5. Set the radial ramp to a ramp that is flat (`"white"`) and confirm check (d)'s
+   hue gap collapses. If it doesn't, the metric is measuring something else —
+   which is the failure this step already made once.
+6. Apply the radial ramp *pre*-sweep in the render loop and look at
+   `teal_gold`. It is a genuinely different, arguably nicer look. Decide whether
+   it deserves to be a mode.
+
+---
+
+## Where step 3 stops, and what comes next
+
 - **step 4 — controls, performance, and AE realities.** Source-mask modes
-  (luma / alpha / matte) live here alongside alpha as a fourth channel.
-  Resolution independence needs verifying rather than assuming: `reach` is a
-  *fraction*, so it may already be free — but `detail` and the Nyquist fade are
-  in pixels and certainly are not. Also the `1/r²` exposure question from step 1,
-  and a LUT over θ for the shimmer mask (check (f) shows the mask build is 438 ms
-  at 1080p, which is not nothing).
+  (luma / alpha / matte) alongside alpha as a fourth channel. Resolution
+  independence needs *verifying*, not assuming: `reach` and the radial ramp are
+  fractions and may already be free, but `detail` and the Nyquist fade are in
+  pixels and certainly are not. Plus the `1/r^2` exposure question from step 1,
+  a LUT over theta for the shimmer mask (step 2 check (f): the mask build is
+  438 ms at 1080p), and a profiler run before optimising anything - Star Glint
+  step 4's actual lesson.
 - **step 5 — C++.** SmartFX with output buffer expansion, since shafts leave the
   layer bounds. Then the CUDA/Metal port, where the ping-pong shape pays off.
 
 Reused wholesale from work already shipped: Bloom's linear-light spine and
-bright pass, Star Glint's geometric doubling and grid cache, Gradient Map's ramp
-LUT (step 3). The genuinely new ideas are the translation→scale rewrite (step 1)
-and the angular-commutation theorem (step 2) — and both are proved, not asserted.
+bright pass, Star Glint's geometric doubling, grid cache and band stitch,
+Gradient Map's ramp LUT. The genuinely new ideas are the translation->scale
+rewrite (step 1) and the angular-commutation theorem (step 2, confirmed from the
+other side in step 3) - and all of them are proved, not asserted.
+
+The running theme, three steps in: **Star Glint's tools all transfer and its
+corrections mostly do not.** Geometric band spacing and the double-resample fold
+were each a fix for a failure mode that turns out not to exist here, and both
+were caught only because the check was written as a measurement rather than an
+assertion. Its dispersive-mode conclusion did carry over unchanged.
+
+One Star Glint correction is still **untested** here: the lateral blur that
+equalised arm width across angles. Step 1 guessed it would be unnecessary
+(zoom's composition error is 40x smaller) and step 2 did not get to it. Treat
+that as an open question for step 4, not as a third data point - the whole
+lesson of this step is that the guess and the measurement disagree more often
+than not.
