@@ -188,10 +188,72 @@ Generation indices go **negative** near t=0 (generations already dying when the
 effect starts). NumPy seeds must be non-negative, hence `GEN_BIAS`; the C++
 hash has to tolerate negative generations the same way.
 
+## Step 4 — `cb_step4_scroll.py`
+
+Step 3 read "each row moves left to right or inverse" as the direction the
+*transition* travels. It meant **physical scrolling**, as a per-row choice.
+
+That breaks the assumption every earlier step rests on: steps 1–3 partition
+`[0, width]`, so a row is exactly as wide as the frame. A scrolling row is
+**infinite in x**, and the frame is a window sliding along it.
+
+### Chunks — partitioning an infinite line, statelessly
+The old layout walked `x = 0; while x < width`. You can't walk an infinite line,
+can't walk from 0 to 800000 every frame, and can't keep a cursor between frames
+(AE still needs any frame renderable in isolation).
+
+So the x axis is cut into fixed-width **chunks**. Chunk `c` covers
+`[c*CHUNK, (c+1)*CHUNK)`, is seeded by `(seed, row, chunk, gen)`, and walks its
+own blocks from its own left edge. Drawing a window generates only the chunks it
+touches.
+
+**The price, stated plainly:** a block can never straddle a chunk boundary, so
+there's a forced cut every CHUNK pixels — one seam per chunk, measured at 10.8%
+of edges with CHUNK = 12 cells. It's invisible in practice only because widths
+are random anyway, so a forced boundary reads as one more block edge. CHUNK must
+stay large relative to cell width; as it approaches ~2 cells the cuts become a
+visible regular grid. That's a tradeoff, not a free lunch.
+
+### Where the wipe wave lives now
+In step 3 a block's reveal time came from `pos = x0 / width`. On an infinite
+strip that's unbounded — a block at world x = 400000 gets a start time 400000/W
+sweeps in the future and never appears. So `pos` **wraps**, measured in screen
+space at the generation's birth time:
+
+    pos = frac( (world_x - scroll_offset(T_gen)) / width )
+
+The wave becomes a repeating left-to-right ripple over the strip rather than one
+sweep with an origin. Bounded everywhere, still a pure function of
+(block, generation).
+
+Scroll offset is `sign * speed * t`, with `sign` from the same per-row direction
+choice — so `scroll=0` collapses this file back to step 3 (up to chunk seams),
+and one direction control now governs both the motion and the wave.
+
+### Direction default changed
+`ltr` (constant) is now the default. Alternating rows makes the frame read as a
+ping-pong loop — two interleaved combs shuttling against each other. Still
+available as `alternate`, just not the default.
+
+### Measured
+    stateless: |cold - after-scrubbing| = 0.000e+00   OK
+
+    render cost vs distance along the strip:
+      t=     0.5   world x ~      60      14.1 ms
+      t=    50.0   world x ~    6000      15.7 ms
+      t=  5000.0   world x ~  600000      14.9 ms
+
+    seam: 14 forced edges of 130 (10.8%) at chunk=744px, cell=62px
+    wrap: max |t_in - birth| over chunks 0..100000 = 1.0787 (bound 1.4700)
+
+Flat cost at world x = 600000 is the check that nothing walks from x=0. The
+wrap bound is the check that distant blocks still appear at all.
+
 ## Param list for the C++ port
 Colour 1–5, Background, Gap %, Cell Width, Width Random, Cell Height,
-Height Random, Seed, Direction (ltr / rtl / alternate / random), Period,
-Sweep, Hold, Block Reveal Time, Stagger, Time Random, Pixel Snap.
+Height Random, Seed, Direction (ltr / rtl / alternate / random; default ltr),
+Scroll Speed, Chunk Width, Period, Sweep, Hold, Block Reveal Time, Stagger,
+Time Random, Pixel Snap.
 
 `Progress` is gone: step 3 has no start and no end, it runs off the layer's own
 time. If a one-shot in/out is still wanted alongside the endless mode, that is a
