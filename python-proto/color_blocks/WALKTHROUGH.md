@@ -249,11 +249,84 @@ available as `alternate`, just not the default.
 Flat cost at world x = 600000 is the check that nothing walks from x=0. The
 wrap bound is the check that distant blocks still appear at all.
 
+## Step 5 — `cb_step5_easing.py`
+
+Row count as a control, and cubic-bezier curves on the transitions.
+
+### Rows — fixing a flaw in steps 1–4
+Earlier steps walked down the frame adding rows until they ran out:
+
+    y = 0
+    while y < height: add a row of random height; y += h
+
+Row count was emergent (you couldn't ask for eight) and **the last row was
+clipped** at whatever fraction of its height was left over — always a different
+size from its neighbours, and at low `h_rand` the only thing breaking an
+otherwise even grid.
+
+Fixed by partitioning instead of walking: pick the count, draw one weight per
+row, normalise the weights to sum to the frame height.
+
+    h_i = height * w_i / sum(w)
+
+Exact count, exact fill, no clipped row, and `h_rand` still controls unevenness
+(at 0 every weight is 1 and the bands are equal). Both sizing modes reduce to
+this: **count mode** takes `n` directly, **height mode** takes
+`n = round(height / cell_h)`. So row height is now a *target*, and the rows
+still tile the frame exactly. Count mode is the resolution-independent one — it
+survives a comp resize or a half-res preview, which pixel heights do not.
+
+### Easing
+`p` goes through a curve before it becomes geometry:
+
+    p_eased = ease(p)    then    edge = x0 + w * p_eased
+
+CSS-style cubic-bezier through (0,0) and (1,1), so the two control points are
+the whole spec — the same `(x1,y1,x2,y2)` you'd type into CSS or AE. **IN and
+OUT have independent curves.** Presets: `linear`, `ease`, `ease-in`,
+`ease-out`, `ease-in-out`, `snap` = (0.10, 0.60, 0.30, 1.00), `back`
+(overshoots).
+
+The subtlety worth knowing: `x` is time, `y` is progress, and the curve is
+parametric in *both*. Evaluating at a given time means first solving
+`Bx(s) = x` for the parameter `s`, then reading `By(s)`. No closed form —
+Newton-Raphson with a bisection fallback, exactly what browsers do. **The
+fallback is not optional:** flat-derivative controls like `(0,0,0,1)` stall
+Newton, and those extremes are precisely what people reach for.
+
+`x` controls are clamped to [0,1] — outside it the curve folds back and returns
+two progresses for one instant. `y` is left free so overshoot works; the drawn
+edge is then clamped to the block's own extent, since a reveal can't run past
+its shape.
+
+### Measured
+    bezier solver residual max|Bx(s) - x| over 1001 samples:
+      linear       residual=9.67e-10  f(0)=0.000 f(1)=1.000  monotonic=True
+      ease         residual=9.95e-10  f(0)=0.000 f(1)=1.000  monotonic=True
+      snap         residual=9.95e-10  f(0)=0.000 f(1)=1.000  monotonic=True
+      back         residual=9.89e-10  f(0)=0.000 f(1)=1.000  monotonic=False
+      ease-in-out  residual=9.87e-10  f(0)=0.000 f(1)=1.000  monotonic=True
+      flat-derivative case (0,0,0,1): residual=9.88e-10  OK
+
+    row partition:
+      n= 3 h_rand=0.0  got  3 rows  sum=340.000000  min=113.33 max=113.33
+      n= 8 h_rand=0.6  got  8 rows  sum=340.000000  min= 24.10 max= 67.24
+      n=17 h_rand=0.0  got 17 rows  sum=340.000000  min= 20.00 max= 20.00
+
+`back` reporting `monotonic=False` is correct — it overshoots by design. Any
+other curve reporting False would be a bug. The `(0,0,0,1)` line is the check
+that the bisection fallback actually runs.
+
 ## Param list for the C++ port
-Colour 1–5, Background, Gap %, Cell Width, Width Random, Cell Height,
-Height Random, Seed, Direction (ltr / rtl / alternate / random; default ltr),
-Scroll Speed, Chunk Width, Period, Sweep, Hold, Block Reveal Time, Stagger,
-Time Random, Pixel Snap.
+Colour 1–5, Background, Gap %, Cell Width, Width Random,
+Row Sizing (Count | Height) + Row Count / Row Height, Height Random, Seed,
+Direction (ltr / rtl / alternate / random; default ltr), Scroll Speed,
+Chunk Width, Period, Sweep, Hold, Block Reveal Time, Stagger, Time Random,
+Ease In (x1,y1,x2,y2), Ease Out (x1,y1,x2,y2), Pixel Snap.
+
+The two eases are 4 floats each. In AE these are best as a preset popup plus
+four sliders revealed on "Custom", rather than eight bare sliders. Note
+[[ae-disk-id-append-only]] when adding them: append param IDs, never insert.
 
 `Progress` is gone: step 3 has no start and no end, it runs off the layer's own
 time. If a one-shot in/out is still wanted alongside the endless mode, that is a
