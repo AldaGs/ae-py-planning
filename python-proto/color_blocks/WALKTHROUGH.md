@@ -82,9 +82,62 @@ identical every row. That is what "straight and clean" means numerically.
 Generalising the lesson from `godrays-star-glint-corrections`: a check is only
 worth having if the broken control actually fails it.
 
-## Open for step 2
-- Global sweep vs per-block stagger amount (currently the sweep is one hard
-  line, so the reveal front is a single vertical edge).
-- 5 colour slots + a separate background colour, vs. black as the 5th slot
-  (which is what the reference actually does).
-- Cell size in pixels vs. a column/row count.
+## Step 2 — `cb_step2_stagger.py`
+
+Adds the control that opens the wipe up, and splits background out of the
+palette (5 free slots + an independent Background colour).
+
+### The stagger rewrite
+Step 1's visible right edge was `min(x1, lead)` — a global line, clipped.
+Rewritten as per-block local progress:
+
+    start(b) = x0 / L * hold            when the sweep arrives here
+    d0(b)    = (x1 - x0) / L * hold     how long it takes to cross
+    p        = clamp((t - start) / d0)
+    right    = x0 + (x1 - x0) * p
+
+That is algebraically *identical* — substitute and `x0` cancels. The point of
+the rewrite is that the duration is now a free variable:
+
+    d = lerp(d0, block_dur, stagger)
+
+At `stagger=0`, `d == d0` and adjacent fronts line up into one straight edge.
+At `stagger=1` every block takes the same time regardless of width, so a wide
+slab reveals slowly while the sliver beside it snaps in, and the front breaks
+into a ragged cascade. **Start times are untouched at every stagger value**, so
+the left-to-right march survives — stagger changes the texture of the front,
+never its direction.
+
+The wipe-out uses the same function with its own start line, which is what keeps
+"in from the left, out from the left" true at any stagger.
+
+`--time-rand` adds a per-block random shove in time, scaled by the block's own
+natural duration so a sliver isn't flung further than a slab. The random phase
+is drawn once at layout time and stored on the block — drawn per frame it would
+be noise, not stagger.
+
+### Measured
+The rewrite claims to be an identity, so it is checked as one, against a control
+that must fail:
+
+    stagger=0.00   max|diff| vs step 1 = 9.903e-14   IDENTICAL
+    stagger=0.25   max|diff| vs step 1 = 8.714e-01   differs
+    stagger=1.00   max|diff| vs step 1 = 8.714e-01   differs
+
+    first-pixel time per block, by stagger:
+      stagger=0.00  0.0000 0.0137 0.0873 0.1100 0.2167 0.2328
+      stagger=0.50  0.0000 0.0137 0.0873 0.1100 0.2167 0.2328
+      stagger=1.00  0.0000 0.0137 0.0873 0.1100 0.2167 0.2328
+
+Rows identical ⇒ stagger moves duration, not start, as claimed.
+
+## Param list for the C++ port
+Colour 1–5, Background, Gap %, Cell Width, Width Random, Cell Height,
+Height Random, Seed, Progress, Hold (in/out split point), Stagger,
+Block Reveal Time, Time Random, Pixel Snap.
+
+## Open
+- Cell size in pixels vs. a column/row count (pixels for now; a count would
+  make the layout resolution-independent).
+- Wipe direction — currently hardcoded left→right both ways, per the brief.
+

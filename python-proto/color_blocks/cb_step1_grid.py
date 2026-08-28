@@ -80,10 +80,13 @@ BACKGROUND = "#000000"
 class Block:
     """One rectangle in the layout, in continuous (sub-pixel) coordinates."""
 
-    __slots__ = ("x0", "x1", "y0", "y1", "colour")
+    # `phase` is a stable per-block random number in [0,1), unused in step 1 and
+    # used by step 2's time jitter. It lives here so both steps share one Block.
+    __slots__ = ("x0", "x1", "y0", "y1", "colour", "phase")
 
-    def __init__(self, x0, x1, y0, y1, colour):
+    def __init__(self, x0, x1, y0, y1, colour, phase=0.0):
         self.x0, self.x1, self.y0, self.y1, self.colour = x0, x1, y0, y1, colour
+        self.phase = phase
 
 
 def jitter(rng, base, amount):
