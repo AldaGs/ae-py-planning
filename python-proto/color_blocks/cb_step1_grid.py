@@ -82,11 +82,15 @@ class Block:
 
     # `phase` is a stable per-block random number in [0,1), unused in step 1 and
     # used by step 2's time jitter. It lives here so both steps share one Block.
-    __slots__ = ("x0", "x1", "y0", "y1", "colour", "phase")
+    # `phase` and `dur_mul` are stable per-block randoms, unused in step 1:
+    # step 2 uses `phase` for time jitter, step 3 adds `dur_mul` to give each
+    # block its own transition speed. They live here so all steps share a Block.
+    __slots__ = ("x0", "x1", "y0", "y1", "colour", "phase", "dur_mul")
 
-    def __init__(self, x0, x1, y0, y1, colour, phase=0.0):
+    def __init__(self, x0, x1, y0, y1, colour, phase=0.0, dur_mul=1.0):
         self.x0, self.x1, self.y0, self.y1, self.colour = x0, x1, y0, y1, colour
         self.phase = phase
+        self.dur_mul = dur_mul
 
 
 def jitter(rng, base, amount):

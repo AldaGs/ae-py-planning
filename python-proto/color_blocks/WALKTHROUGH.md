@@ -131,10 +131,71 @@ that must fail:
 
 Rows identical ⇒ stagger moves duration, not start, as claimed.
 
+## Step 3 — `cb_step3_infinite.py`
+
+Three requests — per-block individual transitions, per-row direction, and
+continuous generation — that turn out to be one change.
+
+### Generations
+The unit stops being "the layout" and becomes a **generation**: a fresh
+partition of one row into blocks, seeded by `(seed, row, gen)`, born at
+`T(g) = g * period`. Generation `g` wipes in, holds, wipes out and dies while
+`g+1` is already being born over it. With `period` shorter than a block's
+lifetime the generations overlap, so a row is never empty and never repeats.
+
+Only a bounded window of generations can be on screen, so the render walks that
+window around the current time instead of simulating from t=0. This matters for
+more than speed: **AE renders frames out of order and caches them**, so a frame
+must be a pure function of `t`. Verified by rendering t=4.37 cold, scrubbing all
+over the timeline, and re-rendering: `|diff| = 0.000e+00`, bit-identical.
+
+### What regenerates and what does not
+Row heights are fixed for all time; only the x-partition inside a row is
+redrawn per generation. Regenerating row heights too was the obvious thing to
+write and it reads as noise — every row boundary slides at a different moment
+and the image never settles into a grid. Fixed rows give the eye a stable
+armature for the changing blocks to play against, which is what the reference
+image has.
+
+### Per-row direction
+Direction changes only which end a block's reveal grows from, and which end of
+the row goes first. Both are the same expression on a mirrored coordinate, so
+there is one code path:
+
+    ltr:  pos = x0/W,      reveal grows x0 -> x1
+    rtl:  pos = 1 - x1/W,  reveal grows x1 -> x0
+
+Modes: `ltr`, `rtl`, `alternate`, `random`.
+
+### Per-block clocks
+Each block carries `phase` (time shove) and `dur_mul` (its own transition
+speed), both drawn at generation time and stored, so they are stable across
+frames. Nothing about a block's timing is shared with its neighbours except its
+generation's birth time.
+
+### Measured
+    stateless: |cold - after-scrubbing| = 0.000e+00   OK
+    coverage over t=0..12: min=0.508 max=0.680 mean=0.591   (never 0)
+    gen 5 == gen 5 (reproducible): True
+    gen 5 == gen 6 (must be False): False
+    rows ltr=[0,2,4] rtl=[1,3,5]
+
+The reproducibility pair is the control: if "gen 5 == gen 5" were False, the
+statelessness check above would have passed by accident.
+
+### Gotcha for the port
+Generation indices go **negative** near t=0 (generations already dying when the
+effect starts). NumPy seeds must be non-negative, hence `GEN_BIAS`; the C++
+hash has to tolerate negative generations the same way.
+
 ## Param list for the C++ port
 Colour 1–5, Background, Gap %, Cell Width, Width Random, Cell Height,
-Height Random, Seed, Progress, Hold (in/out split point), Stagger,
-Block Reveal Time, Time Random, Pixel Snap.
+Height Random, Seed, Direction (ltr / rtl / alternate / random), Period,
+Sweep, Hold, Block Reveal Time, Stagger, Time Random, Pixel Snap.
+
+`Progress` is gone: step 3 has no start and no end, it runs off the layer's own
+time. If a one-shot in/out is still wanted alongside the endless mode, that is a
+mode switch, not a param tweak.
 
 ## Open
 - Cell size in pixels vs. a column/row count (pixels for now; a count would
