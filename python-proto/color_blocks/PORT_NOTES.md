@@ -19,8 +19,61 @@ Effect > ags_utilities. CPU path only so far; no GPU kernels.
 
 ## Status
 - Builds clean, Release x64 → `C:\AE_SDK\_build_out\ColourBlocks.aex`
-- Offline math harness: **22/22 checks pass**, both controls break correctly
-- **Not yet run inside After Effects** — needs an elevated deploy
+- Offline math harness: **25/25 checks pass**, all controls break correctly
+- v1.0.0 build 1 **verified in AE**: renders correctly, all controls work
+- build 2 adds Transition Speed + two latent fixes below; not yet re-verified
+
+## build 2 — Transition Speed, and answering "does it slow down over time?"
+
+**The perf question, measured rather than guessed.** Suspicion was reasonable:
+the effect continuously generates rectangles, and the obvious way to write that
+accumulates them. It doesn't — nothing is ever kept, so nothing needs
+discarding. A frame is rebuilt from hashes of `(seed,row,chunk,gen)` and two
+windows bound how much exists at all. Measured worst-case blocks per frame:
+
+    t ~ 1–9 s      952
+    t ~ 90000 s    953
+
+Flat across nearly five decades of timeline. Per-frame counts *oscillate*
+(552…977) as `t` and the scroll offset cross window boundaries — 3 vs 4
+generations, 3 vs 4 chunks — but they do not grow. So a slowdown deep in a
+comp is AE's frame cache filling, not this effect.
+
+The first version of that check asserted the count was *equal* across `t` and
+failed. Equality was the wrong assertion; boundedness is the property that
+matters.
+
+**Two real latent bugs it did surface:**
+
+1. **Float precision in the strip walk.** The cell walk used absolute strip
+   coordinates. Past 2^24 (~16.7M units) a float cannot represent `x` and
+   `x+1` distinctly, so `x += bw` stops advancing and *the loop never
+   terminates* — AE hangs on a frame, with no symptom resembling a maths bug.
+   At default Scroll Speed that is ~39 hours in; at high Scroll Speed it is
+   barely an hour. Fixed by walking chunk-local and carrying a screen-space
+   `chunkOrigin`. `CB_WavePos` was reworked the same way, using
+   `screenX + scroll*(t - birth)` instead of the algebraically identical but
+   unbounded `x_strip - scroll*birth`.
+
+2. **Generation lifetime under-counted.** The bound was `sweep + hold +
+   blockDur*2`, which is fine at default settings but too small once Time
+   Random passes ~100% — generations were dropped while their slowest blocks
+   were still mid-transition, so those blocks vanished in a single frame:
+
+        timeRand   worst-life   old-bound   new-bound
+             0%       3.4419      3.6000      3.4420
+            60%       3.5754      3.6000      3.5770
+           120%       3.7097      3.6000      3.7120   <- old too small
+           200%       3.8891      3.6000      3.8920   <- old too small
+
+   `CB_BlockLifetime` now accounts for the time shove, the per-block speed
+   multiplier at its slowest (`exp(+0.5)`), and Transition Speed.
+
+**Transition Speed** is a rate multiplier on Block Time (200% halves every
+transition), leaving Period, Sweep and Hold alone. **0 is a deliberate special
+case, not the limit**: an infinitely slow transition leaves every block at zero
+progress and the frame goes *empty*. At 0 each block instead holds a static
+partial reveal spread by its own phase, giving a frozen mid-transition field.
 
 ## The four things AE imposes that the prototype did not
 
