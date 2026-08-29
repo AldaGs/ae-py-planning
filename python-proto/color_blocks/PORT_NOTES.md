@@ -21,7 +21,9 @@ Effect > ags_utilities. CPU path only so far; no GPU kernels.
 - Builds clean, Release x64 → `C:\AE_SDK\_build_out\ColourBlocks.aex`
 - Offline math harness: **25/25 checks pass**, all controls break correctly
 - v1.0.0 build 1 **verified in AE**: renders correctly, all controls work
-- build 2 adds Transition Speed + two latent fixes below; not yet re-verified
+- build 2 adds Transition Speed + two latent fixes; build 3 makes that control
+  continuous. Neither re-verified in AE yet.
+- C++ source now lives in its own repo: **https://github.com/AldaGs/colour_blocks**
 
 ## build 2 — Transition Speed, and answering "does it slow down over time?"
 
@@ -75,6 +77,45 @@ case, not the limit**: an infinitely slow transition leaves every block at zero
 progress and the frame goes *empty*. At 0 each block instead holds a static
 partial reveal spread by its own phase, giving a frozen mid-transition field.
 
+## build 3 — Transition Speed becomes a real ramp
+
+Build 2 special-cased speed 0, which made the slider jump between 0% and 1%.
+The justification given was "an infinitely slow transition leaves every block
+at zero progress and the frame goes empty". **That reasoning was wrong**, and
+it was wrong in an interesting way: the generation lifetime is *derived from*
+the transition duration, so slowing the transition also keeps more generations
+alive, and those older blocks have had proportionally longer to progress.
+
+Measured (`test/cb_speed_probe.cpp`), the frame does the opposite of emptying:
+
+    speed   live gens   visible blocks   mean drawn width   caught mid-transition
+     100%           4              210              0.910           19.5%
+      25%           5              363              0.518           84.6%
+      10%           8              650              0.291           95.1%
+       1%          50             4770              0.038           18.1%
+
+It already looks frozen at low speed, continuously, with no special case.
+
+What actually goes wrong is **cost**. The fill barely moves (1.79× → 2.01× the
+frame — the extra blocks are thinner, so total coverage is nearly constant) but
+time goes 9.5 ms → 82.6 ms at 1080p, because far more generations are alive and
+each thin sliver is its own poorly-cached pass.
+
+So build 3 puts a **knee at 25%**. Above it, Transition Speed is a true rate.
+Below it the rate stops dropping and a *crossfade to a static field* dials in
+instead — each block eases toward a fixed partial reveal set by its own phase
+and stops erasing. Both ends of the crossfade are full frames, the two regimes
+meet exactly at the knee, and the generation window stays pinned there.
+
+    crossfade is continuous through zero    largest step = 0.0033 per 0.1% of slider
+    CONTROL: build 2's special case         stepped 0.8499  <- the reported jump
+    the two regimes meet at the knee        max mismatch = 0.000296
+
+Cost below the knee is now flat at ~26 ms instead of running to 82 ms. It sits
+above the knee's 11 ms because a frozen block is never culled, so every
+generation in the window stays drawn and fill rises to 3.09× — bounded, but not
+free.
+
 ## Is a GPU port worth it? Measured: not yet.
 
 `test/cb_bench.cpp` models the renderer's inner loop over a plain buffer so
@@ -97,6 +138,15 @@ Where it does start to hurt (single threaded; divide by core count for AE):
     4K, defaults                        39.8 ms    1.78x frame
     4K, 40 rows / 14px blocks           81.3 ms    1.82x frame
     4K, 40 rows / 14px / fast regen    389.8 ms    4.70x frame
+
+    6656x2270 (15.1 Mpx), defaults      74.7 ms    1.79x frame
+    6656x2270, 200px blocks             56.9 ms    1.81x frame
+    6656x2270, 16 rows                  78.1 ms    1.78x frame
+    6656x2270, Regenerate Every 0.6s   167.5 ms    3.03x frame
+
+Cost scales **linearly** with resolution — 1.79x frame holds from 1080p to
+15 Mpx. At 6656x2270 that is ~75 ms single threaded, so roughly 5-10 ms once
+MFR spreads it across cores.
 
 The superlinear term is **overlapping generations, not resolution**: pixel
 writes jump 1.78x → 4.44x when Regenerate Every drops, because more
