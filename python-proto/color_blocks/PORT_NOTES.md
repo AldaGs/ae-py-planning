@@ -19,10 +19,9 @@ Effect > ags_utilities. CPU path only so far; no GPU kernels.
 
 ## Status
 - Builds clean, Release x64 → `C:\AE_SDK\_build_out\ColourBlocks.aex`
-- Offline math harness: **25/25 checks pass**, all controls break correctly
-- v1.0.0 build 1 **verified in AE**: renders correctly, all controls work
-- build 2 adds Transition Speed + two latent fixes; build 3 makes that control
-  continuous. Neither re-verified in AE yet.
+- Offline math harness: **33/33 checks pass**, all controls break correctly
+- **builds 1–3 verified in AE**: render correctly, all controls work
+- build 4 splits Direction in two; not yet verified in AE
 - C++ source now lives in its own repo: **https://github.com/AldaGs/colour_blocks**
 
 ## build 2 — Transition Speed, and answering "does it slow down over time?"
@@ -115,6 +114,33 @@ Cost below the knee is now flat at ~26 ms instead of running to 82 ms. It sits
 above the knee's 11 ms because a frozen block is never culled, so every
 generation in the window stays drawn and fill rises to 3.09× — bounded, but not
 free.
+
+## build 4 — Scroll Direction and Wipe Direction split apart
+
+Two independent controls, so a row's strip can travel one way while its reveal
+wave runs the other.
+
+**The trap was in `CB_WavePos`**, where both directions meet in four lines. The
+term that walks a block back from where it sits on screen *now* to where the
+strip was when its generation was born has to follow the **scroll** — it must
+cancel `CB_ScrollOffset` exactly, or the wave detaches from the blocks it is
+moving through. Only the mirror at the end, deciding which end of the row goes
+first, is the **wipe**. Confusing the two would have presented as a timing bug,
+not a direction bug.
+
+**Wipe Direction defaults to "Same as Scroll"** — compatibility, not
+convenience. One control drove both until now, so a project saved earlier has
+no value for this param; any other default would silently re-time every comp
+that used Alternate or Right to Left. Checked rather than assumed:
+
+    Same as Scroll reproduces the old coupled behaviour  wipe == scroll, all 4 modes
+    two Random per Row streams are independent           20 of 40 rows differ
+    CONTROL: one shared stream                           same shuffle on 40 of 40
+    the random draw is mode-independent                  stream stays in step
+    wipe popup maps onto the direction modes             MATCH->scroll, then value-1
+
+`CB_DirForRow` and `CB_ResolveWipeMode` moved into `ColourBlocks_Math.h` so
+that compatibility claim is measurable offline.
 
 ## Is a GPU port worth it? Measured: not yet.
 
