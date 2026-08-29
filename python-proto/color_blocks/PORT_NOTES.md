@@ -75,6 +75,40 @@ case, not the limit**: an infinitely slow transition leaves every block at zero
 progress and the frame goes *empty*. At 0 each block instead holds a static
 partial reveal spread by its own phase, giving a frozen mid-transition field.
 
+## Is a GPU port worth it? Measured: not yet.
+
+`test/cb_bench.cpp` models the renderer's inner loop over a plain buffer so
+this is a number, not an opinion. 1080p, 32-bit float, single threaded:
+
+    time                    9.1 ms
+    pixel writes        3687294   (1.78x the frame)
+    of which edge px      60774   (1.65%)
+
+**The effect is bandwidth-bound, not compute-bound.** It writes ~1.8 frames'
+worth of pixels and does almost no arithmetic per pixel — 98.35% of writes are
+interior pixels that skip the blend and the transfer curve entirely. That is
+the profile a GPU helps with *least*. MFR already spreads it across cores.
+
+Where it does start to hurt (single threaded; divide by core count for AE):
+
+    1080p, defaults                      9.1 ms    1.79x frame
+    1080p, 40 rows / 14px blocks        22.3 ms    1.83x frame
+    1080p, Regenerate Every 0.35s       35.4 ms    4.44x frame
+    4K, defaults                        39.8 ms    1.78x frame
+    4K, 40 rows / 14px blocks           81.3 ms    1.82x frame
+    4K, 40 rows / 14px / fast regen    389.8 ms    4.70x frame
+
+The superlinear term is **overlapping generations, not resolution**: pixel
+writes jump 1.78x → 4.44x when Regenerate Every drops, because more
+generations are alive at once and every one repaints the row.
+
+Verdict: not worth it now. Revisit if 4K + dense rows + fast regeneration
+becomes a normal working config. Note too that a GPU *generator* pays a
+readback whenever the rest of the chain is CPU (4K 32-bit is ~33 MB/frame),
+which would eat much of the win — and three kernels plus a byte-exact params
+struct is a large maintenance surface to keep in lock-step (see
+`godrays-star-glint-corrections`).
+
 ## The four things AE imposes that the prototype did not
 
 **1. `NON_PARAM_VARY`.** The single most important line in `GlobalSetup`. This
