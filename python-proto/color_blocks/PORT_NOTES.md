@@ -23,6 +23,11 @@ Effect > ags_utilities. CPU path only so far; no GPU kernels.
 - **builds 1–3 verified in AE**: render correctly, all controls work
 - build 4 splits Direction in two; not yet verified in AE
 - C++ source now lives in its own repo: **https://github.com/AldaGs/colour_blocks**
+- macOS Xcode project written (`Mac/ColourBlocks.xcodeproj`) but **never
+  compiled** — authored on Windows, pending a Mac session. Ships a Release
+  config (−O3, universal) because the SDK samples are Debug-only and this
+  effect is fill-bound, so −O0 reads as "the Mac build feels sluggish" with
+  nothing in the code to blame.
 
 ## build 2 — Transition Speed, and answering "does it slow down over time?"
 
