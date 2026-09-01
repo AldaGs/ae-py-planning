@@ -20,14 +20,16 @@ Effect > ags_utilities. CPU path only so far; no GPU kernels.
 ## Status
 - Builds clean, Release x64 → `C:\AE_SDK\_build_out\ColourBlocks.aex`
 - Offline math harness: **33/33 checks pass**, all controls break correctly
-- **builds 1–3 verified in AE**: render correctly, all controls work
-- build 4 splits Direction in two; not yet verified in AE
+- **builds 1–4 verified in AE**: render correctly, all controls work
+- **the macOS project builds and loads** (user compiled it 2026-09-01) — the
+  "never compiled" caveat is retired
+- build 5 fixes the flicker found in that build; not yet re-verified
 - C++ source now lives in its own repo: **https://github.com/AldaGs/colour_blocks**
-- macOS Xcode project written (`Mac/ColourBlocks.xcodeproj`) but **never
-  compiled** — authored on Windows, pending a Mac session. Ships a Release
-  config (−O3, universal) because the SDK samples are Debug-only and this
-  effect is fill-bound, so −O0 reads as "the Mac build feels sluggish" with
-  nothing in the code to blame.
+- macOS Xcode project (`Mac/ColourBlocks.xcodeproj`) **compiles and loads in
+  AE** — authored on Windows against the CornerRounder sample and confirmed
+  working first try. Ships a Release config (−O3, universal) because the SDK
+  samples are Debug-only and this effect is fill-bound, so −O0 reads as "the
+  Mac build feels sluggish" with nothing in the code to blame.
 
 ## build 2 — Transition Speed, and answering "does it slow down over time?"
 
@@ -146,6 +148,52 @@ that used Alternate or Right to Left. Checked rather than assumed:
 
 `CB_DirForRow` and `CB_ResolveWipeMode` moved into `ColourBlocks_Math.h` so
 that compatibility claim is measurable offline.
+
+## build 5 — two causes of block flicker, both found by measurement
+
+Reported from a real build as "some blocks flicker". `test/cb_flicker_probe.cpp`
+identifies each block by `(row, generation, chunk, index)` — stable across
+frames, since the layout is a pure function of those — renders consecutive
+frames, and measures how far each block's drawn width moves in one frame step.
+
+**The probe's own first version was wrong** and worth recording: it counted a
+block scrolling off the frame edge as a pop, and reported hundreds of phantoms
+in every scenario. Tracking screen extent and judging only blocks comfortably
+on screen separated the real signal from that noise. A detector needs debugging
+like anything else.
+
+Two real causes then separated cleanly:
+
+**1. Transitions finishing inside one frame.** At low Stagger a block's duration
+is proportional to its *width*, and Width Random deliberately makes thin
+slivers, so the thinnest got durations far below a frame — the whole wipe fell
+between two rendered frames and the block blinked on. Pops appeared below ~80%
+Stagger, **which is the default**, sitting exactly on the edge; also reachable
+at any Stagger with a short Block Time. Fixed by flooring every wipe at
+`CB_MIN_TRANSITION_FRAMES` (2.5) frames, using the real frame duration from
+`in_data->time_step / time_scale`.
+
+The floor is deliberately not higher. At low Stagger slivers are *supposed* to
+snap — that is the control working — so the goal was to stop the blink, not to
+slow the wipe.
+
+**2. Frozen blocks evicted mid-draw.** Under build 3's freeze crossfade a block
+never finishes wiping out, so it sat at full width until its generation aged out
+of the window, then vanished in one frame. `CB_FreezeEnvelope` now fades each
+generation in and out by age.
+
+    scenario                worst jump before -> after
+    Stagger 0%                    1.000 -> 0.400   pops 294 -> 0
+    Stagger 30%                   0.448 -> 0.400   pops 454 -> 0
+    Transition Speed 0            0.846 -> 0.046   pops 116 -> 0
+    6656 wide, Stagger 0%         1.000 -> 0.400   pops 640 -> 0
+    defaults                      0.184 -> 0.184   pops   0 -> 0
+
+**A latent bug the work exposed:** `CB_BlockLifetime` bounded a block's life
+using only the `fixed` end of the stagger blend, ignoring `natural` (which is
+proportional to block width). With a long Sweep and wide blocks `natural`
+dominates and the bound under-counted, culling generations early.
+`CB_MaxBlockDuration` now takes the larger of the two ends.
 
 ## Is a GPU port worth it? Measured: not yet.
 
