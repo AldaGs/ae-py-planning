@@ -54,10 +54,12 @@ ppm=100 to ppm=1000 because the solver resolves much tighter than
 `collision_slop`, and only breaks down at ppm=10000. **Usable band 10–1000;
 settled on 100.**
 
-**E. Anchor point vs centre of mass.** The solver tracks a COM; the layer pivots
-on its anchor, and they never coincide. The bake is
-`position = com_world + R(theta) * (anchor_local - com_local)`.
-Getting it wrong looks exactly like a solver bug.
+**E. Anchor point vs centre of mass.** **CLOSED IN A2.** The solver tracks a
+COM; the layer pivots on its anchor, and they never coincide. Both directions
+are implemented and round-trip exactly:
+`com_world = position + R(theta)*(com_layer - anchor)` going in,
+`position = com_world + R(theta)*(anchor - com_layer)` coming out.
+Verified by replay against solver ground truth, not by inspection.
 
 **F. Rotation unwrapping.** Solvers report angle in (-pi, pi]. A wheel that spins
 twice must bake as 720 degrees, not snap back to 0. Angles need accumulating
@@ -84,8 +86,12 @@ Everything here runs offline against synthetic and AE-exported inputs.
   matching AE, with no sign flip), ppm=100, and schema `ae-physics-bake/1`.
   Two plan predictions falsified: Chipmunk's integrator is explicit, not
   semi-implicit, and Wall D's upper half sits two decades higher than expected.
-- **A2. The anchor/COM transform.** Give each body an arbitrary anchor offset
-  and verify a rendered preview matches the sim. Wall E, plus F via a spinner.
+- **A2. The anchor/COM transform.** DONE — 10/10 checks. Wall E closed: both
+  directions of the layer-space/body-space transform, verified by replaying
+  each frame the way AE would and comparing to the solver's own vertices
+  (worst error 3e-06 px, and that floor is keyframe rounding, not the
+  transform). Test shape is an L whose COM falls outside the material.
+  `geom.py` also builds the compound mass properties A3 will need.
 - **A3. Bezier paths → bodies.** Feed real shape-layer path data (vertices +
   tangents, dumped from AE by hand as JSON), flatten, simplify, convex-decompose.
   Walls B and C on the easy input.

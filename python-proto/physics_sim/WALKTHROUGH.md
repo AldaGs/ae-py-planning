@@ -83,7 +83,77 @@ half-height 70, and box_b stacks at 693 ≈ 831 − 140.
 300 frames gives roughly 2.3 MB of JSON. Not a problem yet, but Wall I
 (keyframe volume) will want compact separators and probably fewer decimals.
 
+---
+
+# A2 — layer space vs body space (Wall E)
+
+`python a2_anchor_com.py` → 10/10 checks, `a2_checks.png`, `a2_bake.json`.
+
+A1 only used symmetric primitives, whose COM is trivially their centre — which
+hides the entire problem. A2's test shape is a thin L built from two convex
+parts, and its centre of mass lands at layer-space **(60, 160)**, which is
+**outside the material**: the layer rotates about a point that is not on it.
+It sits 56.6 px from the bounding-box centre, so anyone reaching for the bbox
+centre is wrong by that much on every frame.
+
+## The two transforms
+
+AE describes a layer as content in layer space plus an anchor plus a Position
+saying where that anchor sits. The solver describes a body as a COM with
+content hung off it. Converting is Wall E, and it runs both ways:
+
+```
+into the solver:  com_world = position  + R(theta) * (com_layer - anchor)
+out to AE:        position  = com_world + R(theta) * (anchor - com_layer)
+```
+
+Being exact inverses is what makes the round-trip check possible: feed in a
+position, bake frame 0, get the same position back. Over four cases including
+±180° and an anchor placed exactly on the COM, the error is **0.000e+00 px**.
+
+## The headline check: replay
+
+The question that actually matters is *does AE, handed only our keyframes,
+draw what the solver simulated?* So the check rebuilds every polygon the way AE
+would — place the anchor at Position, rotate content about it — and compares
+against the solver's own vertices.
+
+Worst error over 91 frames × 2 layers: **2.97e-06 px**. And the error floor is
+*keyframe rounding*, not the transform — the schema stores 6 decimal places, and
+1e-6° of rotation across a ~250px shape is a few microns of vertex movement. The
+transform itself contributes nothing measurable.
+
+The broken control drops the anchor offset (treats the COM as the anchor — the
+single likeliest way to get this wrong) and the error becomes **170.9 px**.
+
+## Mass properties, computed twice
+
+`geom.py` does the polygon math by hand — shoelace area, area centroid, and the
+second moment `I = (rho/12)·Σ cross(Pi,Pj)·(Pi·Pi + Pi·Pj + Pj·Pj)` — then
+subtracts `m·d²` to move it to the centroid. Cross-checked against
+`pymunk.moment_for_poly` on a triangle: **relative difference 0.0**, exactly.
+
+Compound bodies (several convex parts sharing one rigid body, combined by
+area-weighted COM and the parallel axis theorem) are built here rather than in
+A3, because that is precisely what A3's convex decomposition will hand us.
+
+## Falsified again
+
+One predicted number was wrong. I expected a spinning body's anchor to deviate
+from its *starting* x by the offset radius (170.9 px); it deviates by 230.8.
+The starting position is not the extreme of the circle, so that quantity is not
+an invariant at all — it depends on where in the rotation the sim began. The
+real invariant is the **span**, which over at least one full turn is a diameter:
+measured 341.6 px against a predicted 341.8.
+
+Meanwhile the COM holds its x to **1.5e-06 px** across 73 frames, as it must
+with no horizontal force. That contrast is the whole of Wall E in one picture:
+the COM is what obeys the physics, and AE's Position is a point corkscrewing
+around it.
+
 ## Files
 
+- `geom.py` — polygon area, centroid, moments; compound mass properties
 - `sim.py` — scene dataclasses, world construction, stepping, sampling, bake
 - `a1_primitives.py` — the A1 checks and plots
+- `a2_anchor_com.py` — the A2 checks and plots
