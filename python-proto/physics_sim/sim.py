@@ -39,7 +39,11 @@ import pymunk
 
 import geom
 
-SCHEMA = "ae-physics-bake/1"
+# /2 added `id`. Phase A keyed layers by NAME, which works only because Phase A
+# invented its own names. AE lets two layers share a name -- "Shape Layer 1"
+# twice is the default, not an edge case -- so the join key between a scene, its
+# bake and the preview is now the AE layer index. Name is for humans.
+SCHEMA = "ae-physics-bake/2"
 
 
 # --------------------------------------------------------------------------
@@ -302,8 +306,14 @@ def replay_from_keyframes(handle: Handle, track: dict, frame: int):
     return out
 
 
-def bake(scene: Scene) -> dict:
+def bake(scene: Scene, ids: list[int] | None = None) -> dict:
+    """`ids` are the AE layer indices, in scene order. Defaults to 1..n, which
+    is what the synthetic Phase A scenes want; a real comp passes its own."""
     handles, tracks = simulate(scene)
+    if ids is None:
+        ids = list(range(1, len(handles) + 1))
+    if len(ids) != len(handles) or len(set(ids)) != len(ids):
+        raise ValueError("ids must be one unique id per body")
     ppm = scene.pixels_per_meter
     return {
         "schema": SCHEMA,
@@ -319,6 +329,7 @@ def bake(scene: Scene) -> dict:
         },
         "layers": [
             {
+                "id": ids[i],
                 "name": h.spec.name,
                 "index": i + 1,
                 "anchor_offset": [round(v, 6) for v in h.anchor_offset],
@@ -329,5 +340,5 @@ def bake(scene: Scene) -> dict:
     }
 
 
-def bake_json(scene: Scene) -> str:
-    return json.dumps(bake(scene), indent=2, sort_keys=True)
+def bake_json(scene: Scene, ids: list[int] | None = None) -> str:
+    return json.dumps(bake(scene, ids), indent=2, sort_keys=True)

@@ -507,3 +507,135 @@ vertex by **0.05 px** — changes the digest. So agreement is evidence.
   contact sheet, mask disagreement. No solver imports.
 - `a5_preview.py` — the fault injectors, the measurements, the plots.
 - `a5_preview.gif` — 97 frames of the four AE exports, drawn from the JSON.
+
+---
+
+# B1 — the input schema, and the half that AE has to answer
+
+`python b1_scene.py` → 18/18 checks, `b1_checks.png`. Files: `scene_io.py`,
+`b1_read_shapes.jsx`, `b1_fixture_scene.json`.
+
+B1 is the first step whose deliverable is half unrunnable here. The split is
+deliberate:
+
+| | |
+|---|---|
+| **the script's job** | walk Contents, compose group transforms down to layer space, serialise. **Unverified until AE runs it.** |
+| **the Python's job** | read that document, validate it usefully, build the same bodies A3/A4 built. Verified offline against a fixture. |
+
+The transform maths the script depends on is *not* left unverified: `compose_*`
+lives in `scene_io.py`, the jsx mirrors it line for line, and it is measured
+against closed-form answers here. So when the first AE run disagrees, the
+question is "did the script read the right property?" — not "is the maths
+right?" — which is a much smaller place to look.
+
+## Phase A had no input format
+
+Its scenes were Python dataclasses written by hand in `a1..a5`. Fine for a
+sandbox, useless the moment something outside Python has to produce one. So B1
+begins by defining `ae-physics-scene/1`, and defining it is what surfaced
+everything below.
+
+## A3's open debt, paid
+
+A3 wrote that it *assumed* path vertices arrive in the same space as the anchor,
+and flagged it for B1. The answer: **the assumption is false in AE and true in
+the schema.** A shape layer is a tree — Contents holds groups, groups hold
+groups, and every group has its own transform. A path's vertices are in the
+space of its enclosing group. Composing down is the *script's* job, so
+complexity sits at the boundary rather than in the solver.
+
+Nested composition is checked against a hand-worked answer: a point at (4,0)
+through a group scaled 50% and rotated 90°, then one scaled 200% and rotated
+−90°, lands at exactly (4,10). The broken control is the bug A3 could not rule
+out — ignore the group transforms and that point stays at (4,0), **10 px wrong
+on a shape only 4 px from its own origin**.
+
+## Duplicate layer names, and why the bake schema is now /2
+
+AE lets two layers share a name. "Shape Layer 1" twice is the *default*, not an
+edge case. Phase A keyed the bake — and `preview.index_bake` — **by name**,
+which worked only because Phase A invented its own names.
+
+The fixture has two layers called "Shape Layer 1". Keying by name gives 2
+entries for 3 layers: one is silently dropped, no error, and the preview would
+simply not draw it. So `id` — the AE layer index, unique within a comp — is now
+the join key, name is for humans, and the bake schema went to
+**`ae-physics-bake/2`**. This is exactly the class of bug the sandbox exists to
+find before AE does.
+
+## The check that could not be written
+
+The obvious round trip is Scene → document → Scene. It cannot be written, and
+finding that out was worth more than the check.
+
+**A `Scene` holds convex parts.** It sits downstream of flattening,
+simplification and ear clipping; the contours it came from are gone. Writing the
+parts back out as paths produces a *different* document that happens to draw the
+same picture — and re-reading it re-runs containment nesting over polygons that
+share edges, which dies in `triangulate` with no ear to clip. That is how it was
+discovered: as a crash, not as an argument.
+
+So the round trip is done where it means something — **text → document → Scene →
+bake, twice, byte-identical** — and the fact itself is now a check (6b) so it
+cannot quietly stop being true. Phase C will want a real scene writer for a
+panel; that needs bodies to keep their source contours, which is a change to
+`PolyBody`, not a detail of the IO module.
+
+## Scale, baked into the geometry
+
+A rigid body has no scale, so a layer at 200% cannot be modelled as-is. Scale
+goes into the geometry at read time — vertices *and* anchor — which is exact
+rather than approximate, because AE applies scale in layer space before rotation:
+
+```
+comp = position + R(theta) * (S * (p - anchor))
+     = position + R(theta) * ((S*p) - (S*anchor))
+```
+
+Measured: 200% gives exactly 4.000000000× the area. Every loaded body comes out
+anchor-centred, which is what makes the baked Position mean in Python what it
+means in AE. The layer's own Scale property is never touched — we only write
+Position and Rotation back. An *animated* scale is not a rigid body at all, and
+gets a warning.
+
+## A control that lied, and the metric that fixed it
+
+The broken control for "tangents are relative, not absolute" first measured
+**area**, and reported **1.00×** — the mistake looked harmless. It is not. A
+wrecked path crosses itself, and the shoelace formula cancels the overlapping
+lobes against each other.
+
+Extent is the honest metric: how far from the centre the curve actually goes.
+The same path swings **253 px from the centre instead of 100**. Worth keeping in
+mind wherever a broken control is scored by a signed integral.
+
+## Validation, because the producer is unreachable
+
+The document comes from a hand-rolled ES3 serialiser inside a host application
+that cannot be debugged from here, so `validate()` returns **every** problem at
+once as sentences naming the layer and the field. Eight injected faults, eight
+caught: wrong schema version, a `null` vertex (which is what `toFixed` on NaN
+writes), tangent counts out of step with vertices, a one-vertex path, an open
+path, a layer with no paths, duplicate ids, and a zero scale.
+
+## What the script knows that this sandbox never had to
+
+Writing the jsx surfaced constraints Phase A never met:
+
+- **There is no `JSON` object in ExtendScript.** ES3. The serialiser is
+  hand-rolled, which is precisely why `validate()` is as fussy as it is.
+- **Parametric shapes have no vertices.** A Rectangle, Ellipse or Polystar is
+  `ADBE Vector Shape - Rect` and friends, with no vertex list and no scripting
+  API to convert one. The script reports them loudly and tells the user to
+  right-click → Convert To Bezier Path, rather than silently reading nothing.
+- **Open paths are skipped**, 3D layers are skipped, and animated paths,
+  positions and scales each raise a warning rather than being quietly flattened
+  to their value at time 0.
+
+## Still open
+
+`b1_read_shapes.jsx` has never run. The first real comp is expected to find
+something — a match name that differs by AE version, a property that returns a
+3-vector where a 2-vector was assumed. `validate()` exists so that whatever it
+is arrives as a sentence rather than a stack trace.

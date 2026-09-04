@@ -11,6 +11,7 @@
         0.0,
         0.0
       ],
+      "id": 1,
       "index": 1,
       "keyframes": {
         "position": [
@@ -1356,6 +1357,7 @@
         0.0,
         0.0
       ],
+      "id": 2,
       "index": 2,
       "keyframes": {
         "position": [
@@ -2701,6 +2703,7 @@
         0.0,
         0.0
       ],
+      "id": 3,
       "index": 3,
       "keyframes": {
         "position": [
@@ -4042,7 +4045,7 @@
       "name": "ball"
     }
   ],
-  "schema": "ae-physics-bake/1",
+  "schema": "ae-physics-bake/2",
   "sim": {
     "engine": "pymunk",
     "gravity_px_s2": [

@@ -42,6 +42,7 @@ PALETTE = [
 @dataclass
 class PreviewLayer:
     """A layer as AE holds one: content in layer space, plus an anchor."""
+    id: int
     name: str
     parts: list[Poly]
     anchor: Vec = (0.0, 0.0)
@@ -107,8 +108,10 @@ def transform_layer(layer: PreviewLayer, bake_layer: dict, t: float) -> list[Pol
     return out
 
 
-def index_bake(bake: dict) -> dict[str, dict]:
-    return {lay["name"]: lay for lay in bake["layers"]}
+def index_bake(bake: dict) -> dict[int, dict]:
+    """Keyed by id, never by name -- AE allows duplicate layer names, and this
+    dict comprehension would silently drop one of them."""
+    return {lay["id"]: lay for lay in bake["layers"]}
 
 
 # --------------------------------------------------------------------------
@@ -125,7 +128,7 @@ def render_frame(bake: dict, layers: list[PreviewLayer], scene: PreviewScene,
     """
     w = max(1, int(round(scene.width * scale)))
     h = max(1, int(round(scene.height * scale)))
-    by_name = index_bake(bake)
+    by_id = index_bake(bake)
 
     img = Image.new("1" if mask_only else "RGB", (w, h),
                     0 if mask_only else scene.background)
@@ -137,7 +140,7 @@ def render_frame(bake: dict, layers: list[PreviewLayer], scene: PreviewScene,
                    fill=(90, 96, 104), width=max(1, int(round(3 * scale))))
 
     for i, layer in enumerate(layers):
-        bl = by_name.get(layer.name)
+        bl = by_id.get(layer.id)
         if bl is None:
             continue
         fill = 1 if mask_only else (layer.color or PALETTE[i % len(PALETTE)])
@@ -200,5 +203,6 @@ def layers_from_scene(scene) -> tuple[list[PreviewLayer], PreviewScene]:
     Phase B replaces this with a read of the real comp; the shape of what it
     returns is the point.
     """
-    layers = [PreviewLayer(b.name, b.parts, b.anchor) for b in scene.bodies]
+    layers = [PreviewLayer(i + 1, b.name, b.parts, b.anchor)
+              for i, b in enumerate(scene.bodies)]
     return layers, PreviewScene(scene.width, scene.height, list(scene.statics))

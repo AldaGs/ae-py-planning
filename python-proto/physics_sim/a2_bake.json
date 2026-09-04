@@ -11,6 +11,7 @@
         -60.0,
         -160.0
       ],
+      "id": 1,
       "index": 1,
       "keyframes": {
         "position": [
@@ -1026,6 +1027,7 @@
         140.0,
         80.0
       ],
+      "id": 2,
       "index": 2,
       "keyframes": {
         "position": [
@@ -2037,7 +2039,7 @@
       "name": "L_drop"
     }
   ],
-  "schema": "ae-physics-bake/1",
+  "schema": "ae-physics-bake/2",
   "sim": {
     "engine": "pymunk",
     "gravity_px_s2": [

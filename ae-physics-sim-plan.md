@@ -162,8 +162,18 @@ preview looks right, and two runs agree exactly.
 
 ## Phase B — AE data round-trip (script only, still no C++)
 
-- **B1.** ExtendScript reads shape-layer paths and writes the same JSON schema
-  Phase A consumes. Confirms the schema survived contact with reality.
+- **B1.** PYTHON HALF DONE -- 18/18 checks; the AE half is written and
+  UNVERIFIED. Defines `ae-physics-scene/1` (Phase A had no input format at all),
+  `scene_io.py` to read and validate it, `b1_read_shapes.jsx` to produce it, and
+  a fixture standing in for AE. Three findings: **A3's layer-space assumption is
+  false in AE** -- vertices sit in their enclosing group's space, so composing
+  down is the script's job (ignoring it is 10 px wrong on a shape 4 px from its
+  origin); **AE allows duplicate layer names**, so keying the bake by name
+  silently drops a layer and the join key is now the layer `id`
+  (`ae-physics-bake/2`); and **a Scene cannot round-trip to a document**,
+  because it holds convex parts and its source contours are gone. Scale is baked
+  into the geometry (exactly 4.000000000x at 200%). Still owed: run the jsx on a
+  real comp.
 - **B2.** ExtendScript applies a Phase-A keyframe JSON to real layers. Wall I
   gets measured here.
 - **B3.** Close the loop: read comp → run the Python sandbox on the file →

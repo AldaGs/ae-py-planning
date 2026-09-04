@@ -171,8 +171,8 @@ def worst_vertex_shift(good, bad, layers, frames):
     idx_g, idx_b = preview.index_bake(good), preview.index_bake(bad)
     for t in frames:
         for lay in layers:
-            for pg, pb in zip(preview.transform_layer(lay, idx_g[lay.name], t),
-                              preview.transform_layer(lay, idx_b[lay.name], t)):
+            for pg, pb in zip(preview.transform_layer(lay, idx_g[lay.id], t),
+                              preview.transform_layer(lay, idx_b[lay.id], t)):
                 for a, b in zip(pg, pb):
                     worst = max(worst, math.dist(a, b))
     return worst
@@ -200,7 +200,7 @@ def test_agrees_with_solver(scene, bake, layers):
     worst = 0.0
     for fr in range(scene.duration_frames + 1):
         for i, lay in enumerate(layers):
-            got = preview.transform_layer(lay, idx[lay.name], float(fr))
+            got = preview.transform_layer(lay, idx[lay.id], float(fr))
             for pg, pt in zip(got, traces[i][fr]):
                 for a, b in zip(pg, pt):
                     worst = max(worst, math.dist(a, b))
@@ -210,13 +210,13 @@ def test_agrees_with_solver(scene, bake, layers):
           "reading only the bake JSON and the layer geometry")
 
     # Broken control: the comparison has to be capable of failing.
-    nudged = [preview.PreviewLayer(l.name, l.parts,
+    nudged = [preview.PreviewLayer(l.id, l.name, l.parts,
                                    (l.anchor[0] + 1.0, l.anchor[1]))
               for l in layers]
     worst_n = 0.0
     for fr in range(0, scene.duration_frames + 1, 8):
         for i, lay in enumerate(nudged):
-            got = preview.transform_layer(lay, idx[lay.name], float(fr))
+            got = preview.transform_layer(lay, idx[lay.id], float(fr))
             for pg, pt in zip(got, traces[i][fr]):
                 for a, b in zip(pg, pt):
                     worst_n = max(worst_n, math.dist(a, b))
@@ -277,7 +277,7 @@ def test_linear_interpolation_cost(scene, bake):
     print("      ------   --------   ----------------   -----------")
     for lay in bake["layers"]:
         kf = lay["keyframes"]["position"]
-        truth = idx_f[lay["name"]]["keyframes"]["position"]
+        truth = idx_f[lay["id"]]["keyframes"]["position"]
         w = wb = 0.0
         nb = 0
         for f in range(1, scene.duration_frames - 1):
@@ -325,7 +325,7 @@ def test_determinism(bake, layers, pscene):
           da == db, f"sha256 {da[:16]} on both, {os.path.getsize(a)} bytes")
 
     tiny = [preview.PreviewLayer(
-        l.name,
+        l.id, l.name,
         [[(x + (0.05 if k == 0 else 0.0), y) for k, (x, y) in enumerate(p)]
          for p in l.parts],
         l.anchor) for l in layers]

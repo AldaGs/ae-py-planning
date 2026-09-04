@@ -1,0 +1,91 @@
+{
+  "_comment": [
+    "Hand-authored stand-in for b1_read_shapes.jsx output, so the Python half",
+    "of B1 is tested before AE is ever opened. Path vertices are already in",
+    "LAYER space -- composing group transforms down is the script's job.",
+    "Deliberately awkward: two layers SHARE A NAME (AE allows it, and 'Shape",
+    "Layer 1' twice is the default), one layer is a ring drawn as two separate",
+    "paths that must nest, one is a bezier circle that must flatten, and one",
+    "carries a 200% scale that has to be baked into the geometry."
+  ],
+  "schema": "ae-physics-scene/1",
+  "comp": {
+    "name": "B1 Fixture",
+    "width": 1920,
+    "height": 1080,
+    "fps": 24,
+    "duration_frames": 96
+  },
+  "sim": {
+    "pixels_per_meter": 100,
+    "gravity_m_s2": 9.8,
+    "substeps": 8
+  },
+  "layers": [
+    {
+      "id": 3,
+      "name": "Shape Layer 1",
+      "anchor": [0, 0],
+      "position": [500, 200],
+      "rotation_deg": 0,
+      "scale": [100, 100],
+      "scale_animated": false,
+      "angular_velocity_deg": 60,
+      "paths": [
+        {
+          "vertices": [[60, 0], [0, 60], [-60, 0], [0, -60]],
+          "outTangents": [[0, 33.137085], [-33.137085, 0], [0, -33.137085], [33.137085, 0]],
+          "inTangents": [[0, -33.137085], [33.137085, 0], [0, 33.137085], [-33.137085, 0]],
+          "closed": true
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "Shape Layer 1",
+      "anchor": [0, 0],
+      "position": [900, 200],
+      "rotation_deg": 15,
+      "scale": [100, 100],
+      "scale_animated": false,
+      "angular_velocity_deg": -45,
+      "paths": [
+        {
+          "vertices": [[-80, -80], [80, -80], [80, 80], [-80, 80]],
+          "outTangents": [[0, 0], [0, 0], [0, 0], [0, 0]],
+          "inTangents": [[0, 0], [0, 0], [0, 0], [0, 0]],
+          "closed": true
+        },
+        {
+          "vertices": [[-40, -40], [40, -40], [40, 40], [-40, 40]],
+          "outTangents": [[0, 0], [0, 0], [0, 0], [0, 0]],
+          "inTangents": [[0, 0], [0, 0], [0, 0], [0, 0]],
+          "closed": true
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "name": "Big Box",
+      "anchor": [0, 0],
+      "position": [1300, 200],
+      "rotation_deg": -10,
+      "scale": [200, 200],
+      "scale_animated": false,
+      "paths": [
+        {
+          "vertices": [[-30, -30], [30, -30], [30, 30], [-30, 30]],
+          "outTangents": [[0, 0], [0, 0], [0, 0], [0, 0]],
+          "inTangents": [[0, 0], [0, 0], [0, 0], [0, 0]],
+          "closed": true
+        }
+      ]
+    }
+  ],
+  "statics": [
+    [[80, 980], [1840, 980]],
+    [[80, 980], [80, 300]],
+    [[1840, 980], [1840, 300]]
+  ],
+  "warnings": []
+}
