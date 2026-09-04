@@ -244,8 +244,100 @@ with an untransformed group, but shape *group* transforms sit between the path
 and the layer, and this sandbox has no real AE dump to check against. B1 is
 where that gets confirmed against actual `evalScript` output instead of assumed.
 
+---
+
+# A4 — rendered alpha to bodies (Wall B, hard input)
+
+`python a4_alpha.py` → 14/14 checks, `a4_checks.png`. Input is four real AE
+render-queue exports in `png-ae-exports/`, and they were a far better test set
+than anything synthetic: **Circ** is a disc with an enclosed hole *and* a notch
+open to the boundary *and* three satellite islands; **Penta** is a pure ring;
+**S** and **Star** are deeply concave single blobs.
+
+Pipeline: alpha → marching squares → nesting → simplify → bridge holes →
+convex parts → **one body per layer**.
+
+## The bug worth the whole step
+
+Marching squares interpolates each crossing to the alpha=threshold iso-line. If
+a corner sample sits *exactly* on the threshold, both of its edges interpolate
+to t=0 — the corner itself — so two different edge points become the same point.
+Keyed by start point, one segment overwrites the other and the loop shatters.
+
+**Eight pixels of alpha==128 in a 300×300 export turned one contour into 76
+fragments, and nothing raised.** Penta passed perfectly throughout (straight
+edges, 2 such pixels in harmless places), so the failure looked shape-dependent
+rather than systemic.
+
+Two things came out of it. Nudging any exactly-on-threshold sample off the
+iso-value removes the entire class of failure. More importantly the routine now
+returns **stats** — segment count, key collisions, unclosed chains — so the
+failure is measurable instead of silent. That is the broken control: with the
+nudge disabled, 4 collisions produce 287 open chains and 79 loops instead of 1.
+
+## Ear clipping had to change
+
+A bridged ring traverses the bridge twice, so vertices legitimately sit on top
+of each other and on each other's edges. An inclusive point-in-triangle test
+treats those as blockers, and ear clipping then finds **no ear at all** on every
+shape with a hole — Circ and Penta both failed outright. The fix is a strict
+interior test plus skipping vertices coincident with the ear's own corners, and
+testing only reflex vertices.
+
+## The image is its own ground truth
+
+The luxury of this step: area and centroid can be checked against the pixels
+directly, by code that never touches the contour path.
+
+| | contour area | pixel area | rel | COM error |
+|---|---|---|---|---|
+| Circ | 29782.4 | 29799 | 0.0006 | 0.071 px |
+| Penta | 18808.3 | 18782 | 0.0014 | 0.091 px |
+| S | 34814.2 | 34816 | 0.0001 | 0.035 px |
+| Star | 36418.1 | 36428 | 0.0003 | 0.017 px |
+
+Sub-pixel centroid agreement is the interpolated iso-line earning its keep — it
+uses the AA band as sub-pixel edge position rather than throwing it away.
+
+Topology matches an independent `scipy.ndimage` labelling exactly, Circ's
+4 islands and 1 hole included.
+
+## What holes and islands are worth
+
+- Ignoring Penta's hole makes it **58% too heavy**, with its COM in the hole.
+- Keeping only Circ's largest island discards **18.6%** of the layer.
+
+All four of Circ's islands stay on **one body**, because one layer is one
+transform. Disconnected shapes on a single rigid body is exactly right here.
+
+## Slivers: found, measured, not solved
+
+A3's synthetic shapes gave a worst part aspect ratio of 27.9. Real contours give
+**145.7**. Raising the Hertel–Mehlhorn merge cap from 8 to 24 does not move that
+number at all — it only cuts part counts (Circ 35→30, Star 12→9). Slivers are
+inherent to ear clipping on a densely sampled smooth curve: a sliver's
+neighbours cannot absorb it without going concave.
+
+So the useful question is not whether slivers exist but whether they carry mass,
+and they do not — parts above aspect 60 hold **≤0.84%** of the area, and all
+four layers simulate for 120 frames without instability. **Flagged as a Phase C
+stability risk rather than fixed.** The merge cap default moved 8 → 12 anyway,
+since it cuts part count for free.
+
+## Also learned
+
+Decomposing a *raw* 800-vertex contour is O(n³) ear clipping — the first run of
+A4 hung on it. Mass properties for a shape with holes need no decomposition at
+all: outer minus holes, area-weighted, with the parallel axis theorem in both
+directions. `geom.with_holes_mass_properties` does it exactly and instantly.
+
+RDP at tol=1.0 keeps 99.3–99.9% of the area while cutting 1320 vertices to 61.
+The area lost through the pipeline is *simplification's*, never decomposition's,
+which preserves the simplified ring to 6e-16.
+
 ## Files
 
+- `alpha_contours.py` — marching squares with stats, nesting, hole bridging
 - `aepath.py` — AE Shape format, adaptive flattening, RDP simplification
 - `decompose.py` — ear clipping, Hertel–Mehlhorn merge, convexity/sliver tests
 - `geom.py` — polygon area, centroid, moments; compound mass properties
@@ -253,3 +345,5 @@ where that gets confirmed against actual `evalScript` output instead of assumed.
 - `a1_primitives.py` — the A1 checks and plots
 - `a2_anchor_com.py` — the A2 checks and plots
 - `a3_paths.py` — the A3 checks and plots
+- `a4_alpha.py` — the A4 checks and plots
+- `png-ae-exports/` — four real AE render-queue exports used as A4's input

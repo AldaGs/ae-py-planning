@@ -37,15 +37,22 @@ rendered pixels. Alpha-derived collision shapes require a C++ AEGP calling
 `AEGP_RenderAndCheckoutFrame`. This is unavoidable and it is the single biggest
 cost in the project. The sandbox defers it by loading PNGs exported from AE.
 
-**B. Contour topology.** A layer's alpha is not one blob. Expect holes (a donut
-needs outer + inner contours, and the hole must actually collide), multiple
-disjoint islands in one layer, and 1px noise specks that become spurious bodies.
+**B. Contour topology.** **CLOSED IN A4** against four real AE exports. Holes,
+islands and specks all handled: nesting by containment depth, holes bridged into
+their outer ring, specks dropped by min-area. Topology matches an independent
+labelling exactly, and contour area/centroid match the pixel count to 0.14% and
+0.09px. The real find was a DEGENERACY: a sample sitting exactly on the
+threshold collapses two edge crossings onto one point and silently shatters the
+contour -- 8 such pixels turned one loop into 76.
 
 **C. Concavity.** **CLOSED IN A3** for a single contour. Ear clipping plus
 Hertel-Mehlhorn merging: area preserved to 1.2e-16, every part convex, worst
 aspect ratio 27.9 (no slivers), and part counts of 2/5/7 for an L, a star and
 a 40-gon. Mass properties are invariant under decomposition, which is the
-check that would catch a subtly wrong cut.
+check that would catch a subtly wrong cut. **Amended by A4:** that "no slivers"
+result was an artefact of synthetic shapes -- real contours reach aspect 146,
+and the merge cap does not help. They carry <1% of the mass, so it is a Phase C
+stability risk rather than a correctness bug.
 
 **D. Units.** ~~Physics engines are tuned for objects sized ~0.1–10 units, so
 expect interpenetration at high pixels-per-meter.~~ **MEASURED IN A1 — half
@@ -101,10 +108,13 @@ Everything here runs offline against synthetic and AE-exported inputs.
   it can be triangulated). Decomposition is mass-invariant: the A2 L rebuilt
   as one concave path lands on the same COM (60,160) to 1e-9.
   Still synthetic input — the layer-space assumption is B1's to confirm.
-- **A4. Alpha → bodies.** Load a PNG exported from AE. Marching squares →
-  contour hierarchy → RDP simplify → decompose. Same walls, hard input, plus
-  holes and islands. Compare the A3 and A4 pipelines — they should converge on
-  one shared "polygon → body" stage.
+- **A4. Alpha → bodies.** DONE — 14/14 checks, on four real AE exports. Wall B
+  closed. The A3 and A4 pipelines did converge on one shared "polygon → body"
+  stage: `simplify_closed` → `convex_parts` → `PolyBody` is common to both, and
+  A4 only adds contour extraction and hole bridging ahead of it. Ear clipping
+  needed a strict-interior test to survive bridged rings. Slivers are real on
+  real contours (aspect 146 vs 28 synthetic) but carry <1% of the mass —
+  flagged as a Phase C risk, not solved.
 - **A5. Preview renderer.** Matplotlib or Pillow animation of the baked result.
   Not decoration — it is the only way to see that a bake is wrong.
 

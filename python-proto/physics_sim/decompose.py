@@ -50,12 +50,18 @@ def is_convex(poly: Poly, tol: float = 1e-9) -> bool:
 
 
 def _point_in_triangle(p: Vec, a: Vec, b: Vec, c: Vec) -> bool:
+    """STRICTLY inside -- a point on the boundary does not block an ear.
+
+    Bridged polygons (A4) traverse the bridge twice, so vertices legitimately
+    lie on top of each other and on each other's edges. An inclusive test
+    treats those as blockers and ear clipping then finds no ear at all on
+    every shape with a hole.
+    """
     d1 = _cross3(a, b, p)
     d2 = _cross3(b, c, p)
     d3 = _cross3(c, a, p)
-    neg = (d1 < -1e-12) or (d2 < -1e-12) or (d3 < -1e-12)
-    pos = (d1 > 1e-12) or (d2 > 1e-12) or (d3 > 1e-12)
-    return not (neg and pos)
+    e = 1e-12
+    return (d1 > e and d2 > e and d3 > e) or (d1 < -e and d2 < -e and d3 < -e)
 
 
 def triangulate(poly: Poly) -> list[Poly]:
@@ -81,10 +87,24 @@ def triangulate(poly: Poly) -> list[Poly]:
             a, b, c = v[i0], v[i1], v[i2]
             if _cross3(a, b, c) <= 1e-12:      # reflex or collinear: no ear
                 continue
-            if any(
-                _point_in_triangle(v[j], a, b, c)
-                for j in idx if j not in (i0, i1, i2)
-            ):
+            # Only reflex vertices can sit inside a candidate ear, and a
+            # vertex coincident with one of the ear's own corners (which
+            # bridging creates by design) is not a blocker.
+            m2 = len(idx)
+            blocked = False
+            for t in range(m2):
+                j = idx[t]
+                if j in (i0, i1, i2):
+                    continue
+                jp, jn = idx[(t - 1) % m2], idx[(t + 1) % m2]
+                if _cross3(v[jp], v[j], v[jn]) > 1e-12:   # convex, skip
+                    continue
+                if any(math.dist(v[j], w) < 1e-9 for w in (a, b, c)):
+                    continue
+                if _point_in_triangle(v[j], a, b, c):
+                    blocked = True
+                    break
+            if blocked:
                 continue
             tris.append([a, b, c])
             idx.pop(k)
@@ -119,7 +139,7 @@ def _merge_on_shared_edge(p: Poly, q: Poly) -> Poly | None:
     return None
 
 
-def convex_parts(poly: Poly, max_verts: int = 8) -> list[Poly]:
+def convex_parts(poly: Poly, max_verts: int = 12) -> list[Poly]:
     """Concave polygon -> list of convex polygons covering the same area.
 
     `max_verts` caps part complexity because Chipmunk (and Box2D more so) get

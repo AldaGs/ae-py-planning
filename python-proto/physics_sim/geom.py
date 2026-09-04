@@ -107,6 +107,39 @@ def compound_mass_properties(
     return total, com, moment
 
 
+def with_holes_mass_properties(
+    outer: Poly, holes: list[Poly], density: float
+) -> tuple[float, Vec, float]:
+    """(mass, COM, moment about the COM) for a ring: outer minus its holes.
+
+    Holes are negative mass. Doing it this way is exact and costs nothing --
+    decomposing first just to measure area and centroid is O(n^3) ear clipping
+    on a thousand-vertex contour, which is how A4 first hung.
+    """
+    m_o, c_o, i_o = mass_properties(outer, density)
+    mass = m_o
+    sx, sy = m_o * c_o[0], m_o * c_o[1]
+    for h in holes:
+        m_h, c_h, _i = mass_properties(h, density)
+        mass -= m_h
+        sx -= m_h * c_h[0]
+        sy -= m_h * c_h[1]
+    if mass <= 0:
+        raise ValueError("holes consume the whole shape")
+    com = (sx / mass, sy / mass)
+
+    # Parallel axis both ways: move each piece's moment to the shared COM,
+    # subtracting the holes.
+    def _shift(m, c, i_c):
+        return i_c + m * ((c[0] - com[0]) ** 2 + (c[1] - com[1]) ** 2)
+
+    moment = _shift(m_o, c_o, i_o)
+    for h in holes:
+        m_h, c_h, i_h = mass_properties(h, density)
+        moment -= _shift(m_h, c_h, i_h)
+    return mass, com, moment
+
+
 def bbox_center(parts: list[Poly]) -> Vec:
     """The WRONG centre -- kept so A2 can show how far off it is."""
     xs = [v[0] for p in parts for v in p]
