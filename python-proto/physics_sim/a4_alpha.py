@@ -41,6 +41,10 @@ from sim import PolyBody, Scene, replay_from_keyframes, simulate_traced
 
 THRESHOLD = 128.0
 SIMPLIFY_TOL = 1.0
+
+# A layer whose islands raise its moment of inertia by more than this over its
+# largest island alone is welded hard enough that the user should be told.
+GLUE_WARN = 1.25
 EXPORTS = "png-ae-exports"
 
 results: list[tuple[str, bool, str]] = []
@@ -271,6 +275,58 @@ def test_pipeline():
           f"{aepath.max_deviation(raw, s1):.4f} px")
 
 
+def glue_warning(rings) -> tuple[dict, str | None]:
+    """The report, plus the sentence the UI should show -- or None if quiet.
+
+    This is the surface Phase B and C call. Islands are welded because one AE
+    layer has one transform, which is a property of the OUTPUT format, not of
+    the physics -- so the user gets told when it costs something.
+    """
+    r = geom.island_glue(rings)
+    if r["islands"] < 2 or r["inertia_ratio"] < GLUE_WARN:
+        return r, None
+    return r, (
+        f"{r['islands']} disconnected pieces are welded into one rigid body "
+        f"(an AE layer has one Position and one Rotation). That is "
+        f"{r['mass_ratio']:.2f}x the mass of the largest piece but "
+        f"{r['inertia_ratio']:.2f}x its moment of inertia, and moves the "
+        f"centre of mass {r['com_shift']:.1f} px. Split the layer in AE if "
+        "the pieces should move independently."
+    )
+
+
+def test_island_glue():
+    print("\n7. ISLAND GLUE  (one layer is one transform -- what does that cost?)")
+    print("      layer    islands   mass x   inertia x   COM shift   gyration")
+    print("      ------   -------   ------   ---------   ---------   --------")
+    reports = {}
+    for f in files():
+        name = os.path.splitext(os.path.basename(f))[0]
+        _p, rings, _g, _s = build(load_alpha(f))
+        r, warn = glue_warning(rings)
+        reports[name] = (r, warn)
+        print(f"      {name:<6}   {r['islands']:7d}   {r['mass_ratio']:6.2f}   "
+              f"{r['inertia_ratio']:9.2f}   {r['com_shift']:7.1f} px   "
+              f"{r['largest_gyration']:.1f} -> {r['gyration']:.1f} px")
+
+    warned = [n for n, (_r, w) in reports.items() if w]
+    check("only the multi-island layer warns",
+          warned == ["Circ"],
+          f"warned: {warned or 'none'}; the three single-island layers report "
+          "a ratio of exactly 1.00, so the check is not warning on everything")
+
+    circ = reports["Circ"][0]
+    check("mass ratio would have called this a 22% effect; inertia says 115%",
+          circ["inertia_ratio"] > 2.0 > circ["mass_ratio"],
+          f"Circ's satellites are {circ['mass_ratio']:.2f}x the mass but "
+          f"{circ['inertia_ratio']:.2f}x the moment -- parallel axis is "
+          "quadratic in distance, so a little mass far out dominates. "
+          f"Radius of gyration {circ['largest_gyration']:.1f} -> "
+          f"{circ['gyration']:.1f} px: the layer spins visibly slower under "
+          "the same torque than the disc alone would")
+    print(f"\n      WARNING for Circ: {reports['Circ'][1]}")
+
+
 def test_specks():
     print("\n6. SPECKS  (a stray pixel is a body the solver thinks about)")
     a = load_alpha(os.path.join(EXPORTS, "Star.png")).copy()
@@ -285,7 +341,7 @@ def test_specks():
 
 
 # --------------------------------------------------------------------------
-# 7. End to end
+# 8. End to end
 # --------------------------------------------------------------------------
 
 def scene_from_exports(frames=120):
@@ -308,7 +364,7 @@ def scene_from_exports(frames=120):
 
 
 def test_end_to_end():
-    print("\n7. END TO END  (four real layers, simulated and replayed)")
+    print("\n8. END TO END  (four real layers, simulated and replayed)")
     scene, _p = scene_from_exports()
     handles, tracks, traces = simulate_traced(scene)
     worst = 0.0
@@ -395,6 +451,7 @@ if __name__ == "__main__":
     test_holes_and_islands_matter()
     test_pipeline()
     test_specks()
+    test_island_glue()
     scene, handles, tracks = test_end_to_end()
     plot(scene, handles, tracks)
 

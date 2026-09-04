@@ -140,6 +140,46 @@ def with_holes_mass_properties(
     return mass, com, moment
 
 
+def island_glue(rings: list[tuple[Poly, list[Poly]]],
+                density: float = 1.0) -> dict:
+    """What it costs to weld a layer's disconnected islands into one body.
+
+    A layer whose alpha has several islands gets ONE rigid body, because an AE
+    layer has one Position and one Rotation and there is nowhere to write a
+    second transform. That is a real modelling assumption -- invisible glue
+    between pieces that are not touching -- and it is not always small, so it
+    is worth measuring rather than mentioning.
+
+    The number that matters is the moment of inertia. Outlying islands sit far
+    from the shared COM, and the parallel axis theorem is quadratic in that
+    distance, so a little mass a long way out costs a lot of angular inertia.
+    Mass ratio alone understates it badly.
+
+    Returns the welded body's properties, the largest island's on its own, and
+    the ratios between them. `inertia_ratio` near 1.0 means the glue is free;
+    well above 1.0 means the layer will spin visibly slower than its main
+    island would.
+    """
+    per = [with_holes_mass_properties(o, hs, density) for o, hs in rings]
+    total = sum(m for m, _c, _i in per)
+    com = (sum(m * c[0] for m, c, _i in per) / total,
+           sum(m * c[1] for m, c, _i in per) / total)
+    moment = sum(i_c + m * ((c[0] - com[0]) ** 2 + (c[1] - com[1]) ** 2)
+                 for m, c, i_c in per)
+
+    m_l, c_l, i_l = max(per, key=lambda t: t[0])
+    return {
+        "islands": len(rings),
+        "mass": total, "com": com, "moment": moment,
+        "largest_mass": m_l, "largest_com": c_l, "largest_moment": i_l,
+        "mass_ratio": total / m_l,
+        "inertia_ratio": moment / i_l,
+        "com_shift": math.dist(com, c_l),
+        "gyration": math.sqrt(moment / total),
+        "largest_gyration": math.sqrt(i_l / m_l),
+    }
+
+
 def bbox_center(parts: list[Poly]) -> Vec:
     """The WRONG centre -- kept so A2 can show how far off it is."""
     xs = [v[0] for p in parts for v in p]

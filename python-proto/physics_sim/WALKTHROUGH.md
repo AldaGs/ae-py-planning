@@ -248,7 +248,7 @@ where that gets confirmed against actual `evalScript` output instead of assumed.
 
 # A4 — rendered alpha to bodies (Wall B, hard input)
 
-`python a4_alpha.py` → 14/14 checks, `a4_checks.png`. Input is four real AE
+`python a4_alpha.py` → 16/16 checks, `a4_checks.png`. Input is four real AE
 render-queue exports in `png-ae-exports/`, and they were a far better test set
 than anything synthetic: **Circ** is a disc with an enclosed hole *and* a notch
 open to the boundary *and* three satellite islands; **Penta** is a pure ring;
@@ -307,8 +307,35 @@ Topology matches an independent `scipy.ndimage` labelling exactly, Circ's
 - Ignoring Penta's hole makes it **58% too heavy**, with its COM in the hole.
 - Keeping only Circ's largest island discards **18.6%** of the layer.
 
-All four of Circ's islands stay on **one body**, because one layer is one
-transform. Disconnected shapes on a single rigid body is exactly right here.
+## Wall J: all four of Circ's islands stay on one body
+
+Because **one AE layer is one transform** -- one Position, one Rotation, and
+nowhere to write a second. So the disc and its three satellites are welded into
+a single rigid body even though nothing touches. That deserves stating plainly:
+it is a property of the *output format*, not of the physics. Physically those
+pieces should fall apart; they cannot, because there is only one layer to bake
+onto. Splitting them means *creating* layers, which is a Phase B capability and
+a real feature for confetti, debris and shattered text.
+
+The weld is not free, and mass ratio badly understates it:
+
+| layer | islands | mass x | inertia x | COM shift | radius of gyration |
+|---|---|---|---|---|---|
+| Circ | 4 | 1.22 | **2.15** | 12.5 px | 70.7 -> 93.7 px |
+| Penta | 1 | 1.00 | 1.00 | 0.0 px | 80.9 |
+| S | 1 | 1.00 | 1.00 | 0.0 px | 84.4 |
+| Star | 1 | 1.00 | 1.00 | 0.0 px | 78.3 |
+
+Circ's satellites are 22% more mass but **115% more moment of inertia**.
+Parallel axis is quadratic in distance, so a little mass a long way out
+dominates: the welded layer spins visibly slower under the same torque than the
+disc alone would. Reading the mass ratio and calling it a 22% effect would have
+been wrong by a factor of five.
+
+`geom.island_glue` measures it; `a4_alpha.glue_warning` turns it into the
+sentence Phases B and C should show, and stays quiet below 1.25x -- the three
+single-island layers report exactly 1.00, so the warning is not fired on
+everything.
 
 ## Slivers: found, measured, not solved
 

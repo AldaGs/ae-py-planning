@@ -72,7 +72,11 @@ Verified by replay against solver ground truth, not by inspection.
 
 **F. Rotation unwrapping.** Solvers report angle in (-pi, pi]. A wheel that spins
 twice must bake as 720 degrees, not snap back to 0. Angles need accumulating
-before they become keyframes.
+before they become keyframes. **CLOSED IN A1, and A5 found its blind spot:** a
+wrapped angle is *invisible on every still* -- 184.88 and -175.12 are the same
+orientation -- and the 360-degree backwards sweep it causes lives entirely
+inside the one frame interval containing the crossing. Any check or preview
+that samples only keyframed frames will score this fault at exactly 0.00 px.
 
 **G. Timestep vs frame rate.** A stable solver wants a small fixed dt with
 substeps; AE wants one sample per frame at comp fps. These are different clocks.
@@ -81,7 +85,30 @@ substeps; AE wants one sample per frame at comp fps. These are different clocks.
 sim gets run twice and compared exactly.
 
 **I. Keyframe volume (AE phase).** 300 frames x 40 layers is 12,000
-`setValueAtTime` calls. Cost unknown until measured.
+`setValueAtTime` calls. Write cost still unknown until Phase B measures it, but
+**A5 closed the accuracy half: uniform decimation is not available.** One
+keyframe per frame is the only exact option; merely halving them costs 22.9 px
+worst-case, and the error is not spread evenly -- it piles up at contacts, since
+free fall is exactly the predicted chord sag `g*dt^2/8` (0.2126 px measured vs
+0.2127 predicted) while contact and rotation are 29x worse. Any reduction has
+to be **error-driven against a pixel budget**, not a fixed stride.
+
+**J. One layer is one transform.** An AE layer has one Position and one
+Rotation, so a layer whose alpha contains several disconnected islands gets ONE
+rigid body -- invisible glue between pieces that are not touching. This is a
+property of the OUTPUT format, not of the physics, and it is **settled for
+Phases A and B: weld, and warn.** Splitting requires *creating* layers, which
+only becomes possible in Phase B, and is the right behaviour for confetti,
+debris and shattered text -- so it is a deferred feature, not a bug.
+
+The warning is not cosmetic, because mass ratio badly understates the cost.
+Measured on A4's `Circ` (a disc plus three satellites): the satellites are
+**1.22x the mass but 2.15x the moment of inertia**, moving the COM 12.5 px and
+the radius of gyration from 70.7 to 93.7 px. Parallel axis is quadratic in
+distance, so a little mass a long way out dominates -- the welded layer spins
+visibly slower under the same torque than the disc alone would.
+`geom.island_glue` computes it and `a4_alpha.glue_warning` is the surface
+Phases B and C call.
 
 ---
 
@@ -108,11 +135,13 @@ Everything here runs offline against synthetic and AE-exported inputs.
   it can be triangulated). Decomposition is mass-invariant: the A2 L rebuilt
   as one concave path lands on the same COM (60,160) to 1e-9.
   Still synthetic input — the layer-space assumption is B1's to confirm.
-- **A4. Alpha → bodies.** DONE — 14/14 checks, on four real AE exports. Wall B
+- **A4. Alpha → bodies.** DONE — 16/16 checks, on four real AE exports. Wall B
   closed. The A3 and A4 pipelines did converge on one shared "polygon → body"
   stage: `simplify_closed` → `convex_parts` → `PolyBody` is common to both, and
   A4 only adds contour extraction and hole bridging ahead of it. Ear clipping
-  needed a strict-interior test to survive bridged rings. Slivers are real on
+  needed a strict-interior test to survive bridged rings. All of a layer's
+  islands stay on one body per Wall J, and `glue_warning` reports what that
+  weld costs. Slivers are real on
   real contours (aspect 146 vs 28 synthetic) but carry <1% of the mass —
   flagged as a Phase C risk, not solved.
 - **A5. Preview renderer.** DONE -- 11/11 checks. A Pillow renderer that shares
