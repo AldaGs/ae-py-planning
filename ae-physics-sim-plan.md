@@ -41,9 +41,11 @@ cost in the project. The sandbox defers it by loading PNGs exported from AE.
 needs outer + inner contours, and the hole must actually collide), multiple
 disjoint islands in one layer, and 1px noise specks that become spurious bodies.
 
-**C. Concavity.** Every 2D engine collides convex shapes. Any real silhouette
-needs convex decomposition, and a bad decomposition produces sliver polygons
-that make the solver explode.
+**C. Concavity.** **CLOSED IN A3** for a single contour. Ear clipping plus
+Hertel-Mehlhorn merging: area preserved to 1.2e-16, every part convex, worst
+aspect ratio 27.9 (no slivers), and part counts of 2/5/7 for an L, a star and
+a 40-gon. Mass properties are invariant under decomposition, which is the
+check that would catch a subtly wrong cut.
 
 **D. Units.** ~~Physics engines are tuned for objects sized ~0.1–10 units, so
 expect interpenetration at high pixels-per-meter.~~ **MEASURED IN A1 — half
@@ -92,9 +94,13 @@ Everything here runs offline against synthetic and AE-exported inputs.
   (worst error 3e-06 px, and that floor is keyframe rounding, not the
   transform). Test shape is an L whose COM falls outside the material.
   `geom.py` also builds the compound mass properties A3 will need.
-- **A3. Bezier paths → bodies.** Feed real shape-layer path data (vertices +
-  tangents, dumped from AE by hand as JSON), flatten, simplify, convex-decompose.
-  Walls B and C on the easy input.
+- **A3. Bezier paths → bodies.** DONE — 15/15 checks. Flatten (adaptive de
+  Casteljau) → simplify (RDP) → convex parts (ear clipping + Hertel-Mehlhorn)
+  → PolyBody. Wall C closed for a single contour; Wall B only partly, since
+  **holes are deferred to A4** (a ring needs its inner contour bridged before
+  it can be triangulated). Decomposition is mass-invariant: the A2 L rebuilt
+  as one concave path lands on the same COM (60,160) to 1e-9.
+  Still synthetic input — the layer-space assumption is B1's to confirm.
 - **A4. Alpha → bodies.** Load a PNG exported from AE. Marching squares →
   contour hierarchy → RDP simplify → decompose. Same walls, hard input, plus
   holes and islands. Compare the A3 and A4 pipelines — they should converge on

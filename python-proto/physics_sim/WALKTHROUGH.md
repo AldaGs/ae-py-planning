@@ -151,9 +151,105 @@ with no horizontal force. That contrast is the whole of Wall E in one picture:
 the COM is what obeys the physics, and AE's Position is a point corkscrewing
 around it.
 
+---
+
+# A3 — bezier paths to bodies (Walls B and C, easy input)
+
+`python a3_paths.py` → 15/15 checks, `a3_checks.png`.
+
+Pipeline: **AE Shape → flatten → simplify → convex parts → PolyBody**.
+
+## The AE format trap
+
+An AE Path stores `vertices`, `inTangents`, `outTangents`, `closed` — and the
+tangents are **relative to their own vertex**, not absolute control points:
+
+```
+P0 = v[i]                    P1 = v[i]   + outTangents[i]
+P3 = v[i+1]                  P2 = v[i+1] + inTangents[i+1]
+```
+
+Reading them as absolute is checked as a broken control: a 200px circle's area
+collapses to **42.7% of the truth** as the shape implodes toward the origin.
+
+## Two errors that behave differently
+
+Flattening has two error sources that are easy to conflate, and separating them
+turned out to matter:
+
+| | behaviour |
+|---|---|
+| **vertex radial error** | flat at 0.0545px regardless of tol |
+| **area error** | linear in tol — 804 px² at tol=4 → 9.5 px² at tol=0.05 |
+
+Flattened vertices lie *exactly on* the bezier, so their radial error is the
+four-arc kappa circle's own approximation — measured 2.73e-04 of the radius,
+which is the textbook 0.027%. Making the flattener 400× finer does not touch
+it. What `tol` buys is chord sagitta, i.e. **area**.
+
+## Decomposition
+
+Ear clipping → triangles → Hertel–Mehlhorn merge. HM isn't optimal (that needs
+Keil–Snoeyink) but it's within 4× and it keeps the part count off the solver's
+back:
+
+| shape | verts | triangles | convex parts |
+|---|---|---|---|
+| L | 6 | 4 | **2** |
+| star | 10 | 8 | **5** |
+| circle | 40 | 38 | **7** |
+
+Area is preserved to a relative **1.2e-16**, every part is convex, and the worst
+aspect ratio is 27.9 — no slivers, which is what would destabilise contact
+normals.
+
+## The check worth having: decomposition invariance
+
+A2 built its L by hand as two rectangles and measured a COM of (60, 160). A3
+builds the same L as a *single concave path*, flattens it, and lets ear clipping
+and HM cut it up however they like. Two completely unrelated routes:
+
+- COM: **(60.000000000, 160.000000000)** — matches to 1e-9
+- area: **16000.000000** — matches
+- moment: relative difference **0.0**, exactly
+
+Decomposition is not allowed to move the mass, and it doesn't. A2's replay check
+then still holds end to end: **3.27e-06 px** worst vertex error across 14 convex
+parts on 3 bodies, and the pile settles without tunnelling or exploding.
+
+## Corrected here
+
+Two constants I had wrong, both caught by checks that failed:
+
+- The kappa circle's radial error is **0.027%** of radius, not the 0.02% I first
+  asserted.
+- The kappa circle's *area* converges to πr² **+ 32 px²** at r=200 (2.5e-4
+  relative), so it is not a tight bound on flattening either.
+
+And one check was passing for the wrong reason: it compared the area deficit at
+tol=4 against a *negative* deficit at tol=0.01, which any positive number beats.
+The deficit changes sign at tol=0.25 because the bezier's own area sits above
+πr². Measuring convergence against the finest run instead removes the bezier's
+constant offset and gives the clean slope-1 line in the plot.
+
+## Not done here
+
+**Holes.** A ring needs its inner contour bridged into the outer one before it
+can be triangulated. The plan puts that in A4, where holes and islands arrive
+together with alpha contours.
+
+**The layer-space assumption.** `aepath.py` assumes path coordinates arrive in
+the same space the anchor is expressed in. That holds for a plain shape layer
+with an untransformed group, but shape *group* transforms sit between the path
+and the layer, and this sandbox has no real AE dump to check against. B1 is
+where that gets confirmed against actual `evalScript` output instead of assumed.
+
 ## Files
 
+- `aepath.py` — AE Shape format, adaptive flattening, RDP simplification
+- `decompose.py` — ear clipping, Hertel–Mehlhorn merge, convexity/sliver tests
 - `geom.py` — polygon area, centroid, moments; compound mass properties
 - `sim.py` — scene dataclasses, world construction, stepping, sampling, bake
 - `a1_primitives.py` — the A1 checks and plots
 - `a2_anchor_com.py` — the A2 checks and plots
+- `a3_paths.py` — the A3 checks and plots
