@@ -339,10 +339,18 @@ var ls = [];
 for (i = 0; i < layers.length; i++) ls.push(layerJson(layers[i]));
 chunks.push(",\"layers\":[" + ls.join(",") + "]");
 
-/* A floor across the bottom of the comp, so a freshly read scene falls onto
- * something instead of out of frame. The panel will own this later. */
-chunks.push(",\"statics\":[[[0," + (comp.height - 1) + "],[" + comp.width +
-            "," + (comp.height - 1) + "]]]");
+/* A CLOSED BOX around the comp, not just a floor. The first version wrote one
+ * floor segment exactly comp-width and nothing else, and B2 found what that
+ * costs: a shape that rolls reaches the end of the segment, leaves the world,
+ * and integrates to infinity -- 839,091 px by the end of a 45 s comp, written
+ * into the project as real keyframes. Walls are the difference between a
+ * placeholder scene and a dangerous one. The panel will own this later. */
+var W = comp.width, H = comp.height;
+chunks.push(",\"statics\":[" +
+            "[[0," + (H - 1) + "],[" + W + "," + (H - 1) + "]]," +
+            "[[0,0],[0," + (H - 1) + "]]," +
+            "[[" + W + ",0],[" + W + "," + (H - 1) + "]]," +
+            "[[0,0],[" + W + ",0]]]");
 
 var ws = [];
 for (i = 0; i < WARNINGS.length; i++) ws.push(str(WARNINGS[i]));
