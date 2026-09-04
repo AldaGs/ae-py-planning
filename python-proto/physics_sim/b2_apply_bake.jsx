@@ -94,18 +94,45 @@ function clearKeys(prop) {
 
 function now() { return (new Date()).getTime(); }
 
+/* A 2D layer's Position takes a TWO-element value and a THREE-element spatial
+ * tangent. Found the hard way:
+ *
+ *     Unable to call "setSpatialTangentsAtKey" because of parameter 2.
+ *     Value array does not have 3 elements
+ *
+ * setValuesAtTimes had already accepted [x, y] for the same property on the
+ * same layer, so the arity is not a property of the property -- it is a
+ * property of the call. Rather than hard-code 3 and meet the mirror image of
+ * this error on some other AE version, the arity is probed once per property
+ * and cached. */
+function tangentArity(prop) {
+    if (prop.numKeys < 1) return 3;
+    try {
+        prop.setSpatialTangentsAtKey(1, [0, 0], [0, 0]);
+        return 2;
+    } catch (e) {}
+    try {
+        prop.setSpatialTangentsAtKey(1, [0, 0, 0], [0, 0, 0]);
+        return 3;
+    } catch (e2) {}
+    return 0;                       // not spatial at all; skip tangents
+}
+
 /* Force straight lines between our samples. Without this AE gives a new
  * Position key auto-bezier SPATIAL tangents and bows the motion path between
  * keyframes -- curvature that was never simulated. */
 function makeLinear(prop, isSpatial) {
     var lin = KeyframeInterpolationType.LINEAR;
+    var arity = isSpatial ? tangentArity(prop) : 0;
+    var zero = (arity === 2) ? [0, 0] : [0, 0, 0];
     for (var i = 1; i <= prop.numKeys; i++) {
         prop.setInterpolationTypeAtKey(i, lin, lin);
-        if (isSpatial) {
+        if (arity) {
             prop.setSpatialAutoBezierAtKey(i, false);
-            prop.setSpatialTangentsAtKey(i, [0, 0], [0, 0]);
+            prop.setSpatialTangentsAtKey(i, zero, zero);
         }
     }
+    return arity;
 }
 
 function applyLoop(prop, times, values) {
@@ -159,13 +186,20 @@ if (mismatches.length) {
     return;
 }
 
+var tangentArity_used = 0;
 var fps = comp.frameRate;
 var frameDur = comp.frameDuration;
 var report = {layers: [], timings: []};
 
+/* Everything from here to endUndoGroup runs inside try/finally. The first run
+ * of this script threw inside makeLinear, which meant endUndoGroup never ran
+ * and AE was left with an undo group open and keyframes half applied. An
+ * aborted script should not leave the project in a state the user cannot
+ * cleanly undo. */
 app.beginUndoGroup("Apply physics bake");
-
+var failure = null;
 var tStart = now();
+try {
 for (i = 0; i < bake.layers.length; i++) {
     var L = bake.layers[i];
     var layer = comp.layer(L.id);
@@ -199,7 +233,7 @@ for (i = 0; i < bake.layers.length; i++) {
     var tBulk = now() - t1;
 
     var t2 = now();
-    makeLinear(pos, true);
+    tangentArity_used = makeLinear(pos, true);
     makeLinear(rot, false);
     var tInterp = now() - t2;
 
@@ -229,9 +263,19 @@ for (i = 0; i < bake.layers.length; i++) {
         stored: stored, tween: tween
     });
 }
+} catch (err) {
+    failure = err;
+} finally {
+    app.endUndoGroup();
+}
 var tTotal = now() - tStart;
 
-app.endUndoGroup();
+if (failure !== null) {
+    alert("Failed part-way through:\n\n" + failure.toString() +
+          "\n\nThe undo group was closed, so Edit > Undo will back the " +
+          "whole partial apply out in one step.");
+    return;
+}
 
 // -------------------------------------------------------------------------
 // Write the report
@@ -244,6 +288,7 @@ out.push(",\"comp\":{\"name\":" + str(comp.name) + ",\"fps\":" + num(fps) +
 out.push(",\"total_ms\":" + tTotal);
 out.push(",\"sample_stride\":" + SAMPLE_STRIDE);
 out.push(",\"ae_version\":" + str(app.version));
+out.push(",\"spatial_tangent_arity\":" + tangentArity_used);
 
 var ts = [];
 for (i = 0; i < report.timings.length; i++) {
