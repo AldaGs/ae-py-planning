@@ -84,14 +84,26 @@ substeps; AE wants one sample per frame at comp fps. These are different clocks.
 **H. Determinism.** A bake that differs between runs is unusable. Every sandbox
 sim gets run twice and compared exactly.
 
-**I. Keyframe volume (AE phase).** 300 frames x 40 layers is 12,000
-`setValueAtTime` calls. Write cost still unknown until Phase B measures it, but
-**A5 closed the accuracy half: uniform decimation is not available.** One
-keyframe per frame is the only exact option; merely halving them costs 22.9 px
-worst-case, and the error is not spread evenly -- it piles up at contacts, since
-free fall is exactly the predicted chord sag `g*dt^2/8` (0.2126 px measured vs
-0.2127 predicted) while contact and rotation are 29x worse. Any reduction has
-to be **error-driven against a pixel budget**, not a fixed stride.
+**I. Keyframe volume (AE phase).** **CLOSED IN B2, and it is not where this
+entry assumed.** Measured on AE 26.3x87 over 6,486 keyframes:
+
+| | us per key | 12,000 keys |
+|---|---|---|
+| `setValueAtTime` in a loop | 6,850 | 82 s |
+| `setValuesAtTimes` in bulk | 19.6 | 0.2 s |
+| forcing LINEAR interpolation | 853 | 10 s |
+
+Bulk writing is **350x** faster, so the worry about 12,000 calls was real and is
+answered. But the cost that remains is **setting interpolation**: 44x the bulk
+write, per-key with no bulk form, and NOT optional -- skipping it lets AE's
+default spatial auto-bezier bow the motion path between our samples. Writing the
+values is free; making them mean what we meant is not. Open for Phase C: whether
+AE's default-interpolation preference can be set before the keys are created,
+removing the pass. Not tested.
+
+A5 closed the accuracy half separately: one keyframe per frame is the only exact
+option, halving them costs 22.9 px, and the error piles up at contacts, so any
+reduction must be **error-driven against a pixel budget**, not a fixed stride.
 
 **J. One layer is one transform.** An AE layer has one Position and one
 Rotation, so a layer whose alpha contains several disconnected islands gets ONE
@@ -162,8 +174,8 @@ preview looks right, and two runs agree exactly.
 
 ## Phase B — AE data round-trip (script only, still no C++)
 
-- **B1.** PYTHON HALF DONE -- 18/18 checks; the AE half is written and
-  UNVERIFIED. Defines `ae-physics-scene/1` (Phase A had no input format at all),
+- **B1. DONE** -- 22/22 checks. The script ran on a real comp and read three
+  hand-drawn shape layers correctly; that export is now a permanent fixture. Defines `ae-physics-scene/1` (Phase A had no input format at all),
   `scene_io.py` to read and validate it, `b1_read_shapes.jsx` to produce it, and
   a fixture standing in for AE. Three findings: **A3's layer-space assumption is
   false in AE** -- vertices sit in their enclosing group's space, so composing
@@ -172,10 +184,18 @@ preview looks right, and two runs agree exactly.
   silently drops a layer and the join key is now the layer `id`
   (`ae-physics-bake/2`); and **a Scene cannot round-trip to a document**,
   because it holds convex parts and its source contours are gone. Scale is baked
-  into the geometry (exactly 4.000000000x at 200%). Still owed: run the jsx on a
-  real comp.
-- **B2.** ExtendScript applies a Phase-A keyframe JSON to real layers. Wall I
-  gets measured here.
+  into the geometry (exactly 4.000000000x at 200%).
+- **B2. DONE** -- 14/14 checks. `b2_apply_bake.jsx` writes the bake and reads
+  its own work back out; `b2_apply.py` verifies the report. **The round trip
+  closes: AE holds exactly what the solver computed** (0.0000 px / 0.0000 deg
+  stored, and straight-line tweens to 0.002 px, which is the report's own
+  rounding). Wall I measured -- see below. Three findings: a 2D layer's Position
+  takes a TWO-element value but a THREE-element spatial tangent, so arity is
+  probed rather than assumed; a throw between begin/endUndoGroup leaves AE
+  wedged, so the apply is now try/finally; and the reader's floor-only scene let
+  a rolling layer leave the world and reach 838,591 px, which was about to be
+  written into a real project -- the reader now emits a closed box and
+  `escapes()` guards every bake.
 - **B3.** Close the loop: read comp → run the Python sandbox on the file →
   apply. Ugly, manual, and it is the entire product working.
 

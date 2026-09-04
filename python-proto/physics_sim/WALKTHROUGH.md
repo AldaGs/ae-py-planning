@@ -639,3 +639,126 @@ Writing the jsx surfaced constraints Phase A never met:
 something — a match name that differs by AE version, a property that returns a
 3-vector where a 2-vector was assumed. `validate()` exists so that whatever it
 is arrives as a sentence rather than a stack trace.
+
+---
+
+# B2 — writing the bake into AE, and Wall I's real shape
+
+`python b2_apply.py` → 14/14 checks with the report present, `b2_preview.png`.
+Files: `b2_apply_bake.jsx`, `b2_apply.py`, `b2_bake.json`,
+`b2_bake_result.json`, `jsx_check.py`.
+
+The round trip closes here: a comp goes in through B1, a bake comes back out
+through B2, and **AE holds exactly what the solver computed.**
+
+| | stored | tween |
+|---|---|---|
+| Shape Layer 3 | 0.0000 px / 0.0000° | 0.0003 px |
+| Shape Layer 2 | 0.0000 px / 0.0000° | 0.0020 px |
+| Shape Layer 1 | 0.0000 px / 0.0000° | 0.0016 px |
+
+The tween column is not noise in AE, it is the report's own 6-decimal rounding.
+
+## Why the script reads its own work back
+
+"It looked right" is not a measurement, and this is the one step where the
+sandbox can see nothing at all. So after writing keyframes the script reads them
+back **out** of AE and saves a report; Python compares that against the bake it
+asked for.
+
+It samples two different things, and the second is the point:
+
+- `stored[]` — did AE keep the numbers we sent?
+- `tween[]` — does AE *interpolate* the way the bake assumes?
+
+That second one is A5's finding restated inside AE. AE's default for a new
+Position keyframe is auto-bezier with **spatial** tangents: the motion path bows
+between keys, adding curvature nobody simulated. That fault leaves every stored
+value perfect and shows up only between keyframes. A verifier reading back only
+stored values would have called such a bake flawless.
+
+The verifier is calibrated before it is pointed at AE: a synthetic report from a
+*perfect* AE must score exactly zero, and four injected faults must each be
+caught — whole-pixel rounding, a bowed tween, a rotation sign flip, and a
+dropped keyframe (caught by count, since sampling every 17th key steps straight
+over it). Otherwise any number it printed later would be its own, not AE's.
+
+## Wall I, measured — and it is not where the plan expected
+
+The plan worried about "12,000 `setValueAtTime` calls, cost unknown until
+measured". Measured, on AE 26.3x87, 6,486 keyframes across 3 layers:
+
+| | µs per key | 12,000 keys |
+|---|---|---|
+| `setValueAtTime` in a loop | 6,850 | **82 s** |
+| `setValuesAtTimes` in bulk | 19.6 | **0.2 s** |
+| forcing LINEAR interpolation | 853 | 10 s |
+
+**Bulk writing is 350× faster**, so the plan's worry was real and is now
+answered. But the interesting number is the third row. Setting interpolation
+costs **44× the bulk write itself** — 5.5 s of the run — it is per-key, there is
+**no bulk form of it**, and it is *not optional*: skip it and AE bows the path.
+
+So Wall I's actual shape is the opposite of what was assumed: **writing the
+values is free; making them mean what we meant is not.** Any future performance
+work belongs on the interpolation pass, not the value writes. (Open question for
+Phase C: whether AE's default-interpolation preference can be set before the
+keys are created, making the pass unnecessary. Not tested, not assumed.)
+
+Total apply was 35.1 s, but ~22 s of that is the naive loop being timed *for
+measurement only* and ~7 s is the read-back. The real cost of applying this bake
+is about 5.7 s, nearly all of it interpolation.
+
+## Two things AE taught us by failing
+
+**Spatial tangents want three elements.** The first run died on:
+
+```
+Unable to call "setSpatialTangentsAtKey" because of parameter 2.
+Value array does not have 3 elements
+```
+
+A 2D layer's Position accepts a **two**-element value — `setValuesAtTimes` had
+taken `[x, y]` on that same property moments earlier — but demands a **three**
+-element spatial tangent. The arity belongs to the *call*, not the property.
+It is now probed once and recorded in the report (`spatial_tangent_arity: 3`)
+rather than hard-coded, so the mirror image of this error on another AE version
+shows up as data instead of a crash.
+
+**An aborted script leaves the project wedged.** The throw happened between
+`beginUndoGroup` and `endUndoGroup`, so AE was left with an undo group open and
+keyframes half written. The second-order lesson is the better one: the apply now
+runs in `try/catch/finally` and closes the group whatever happens, so a failure
+is one Undo away from clean.
+
+`jsx_check.py` came out of the same session — brace balance and unterminated
+string literals. Not a parser. It exists because AE is otherwise the only syntax
+check these files get, and a round trip through AE to find a stray newline in a
+string literal is an expensive way to learn that. It has already caught two.
+
+## The bake that escaped the comp
+
+Found before AE ever saw it, and the worst thing in B2. Baking the real comp,
+one layer left the frame by **838,591 px** and kept accelerating — and that
+number was about to be written into a real project as a keyframe.
+
+It is not a solver bug and not A4's sliver risk. The S **rolls steadily left,
+reaches the end of the floor segment, and falls off the world.** The reader
+script wrote one floor exactly comp-width with no walls: correct physics, and a
+placeholder that happens to be dangerous.
+
+Three responses, because one would not have been enough:
+
+1. the reader now writes a **closed box** — floor, both walls, ceiling;
+2. `escapes()` guards every bake and names the layer and the frame;
+3. `b2_preview.png` renders the trajectory to **look at before applying**,
+   which is A5's whole argument taken seriously at the moment it matters most.
+
+## Matching by index is a tripwire, not a key
+
+The bake joins on `id`, which is the AE layer index — and **index is
+positional**. Adding, deleting or reordering a layer between the read and the
+apply silently moves every id after it. So the script also checks the *name* at
+that index and aborts if it disagrees, writing nothing. The name is not the key
+(B1 established that duplicate names are AE's default); it is a cheap way to
+notice that the comp has moved under us.

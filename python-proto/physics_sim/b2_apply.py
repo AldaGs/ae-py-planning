@@ -37,7 +37,8 @@ from sim import bake as bake_scene
 
 SCENE_FILE = "b1_ae_export.json"
 BAKE_FILE = "b2_bake.json"
-REPORT_FILE = "b2_ae_report.json"
+# Whatever the save dialog was pointed at. Not worth a rename step.
+REPORT_FILES = ("b2_ae_report.json", "b2_bake_result.json")
 REPORT_SCHEMA = "ae-physics-report/1"
 
 results: list[tuple[str, bool, str]] = []
@@ -368,14 +369,17 @@ def write_preview(bake, doc, scene, meta):
 
 def test_real_report(bake):
     print("\n4. THE REAL REPORT  (what AE actually did)")
-    if not os.path.exists(REPORT_FILE):
-        print(f"      {REPORT_FILE} not present -- run b2_apply_bake.jsx in AE")
+    path = next((f for f in REPORT_FILES if os.path.exists(f)), None)
+    if path is None:
+        print(f"      none of {REPORT_FILES} present -- run b2_apply_bake.jsx")
         return False
-    with open(REPORT_FILE, encoding="utf-8") as fh:
+    with open(path, encoding="utf-8") as fh:
         report = json.load(fh)
     check("the report is the schema this verifier reads",
           report.get("schema") == REPORT_SCHEMA,
-          f"{report.get('schema')} from AE {report.get('ae_version', '?')}")
+          f"{path}: {report.get('schema')} from AE "
+          f"{report.get('ae_version', '?')}, spatial tangent arity "
+          f"{report.get('spatial_tangent_arity', '?')}")
 
     v = verify(bake, report)
     print("      layer                 stored px   stored deg   "
@@ -402,34 +406,46 @@ def test_real_report(bake):
           "path is bowing between keyframes -- curvature nobody simulated")
 
     if report.get("timings"):
-        print("\n      WALL I, MEASURED IN AE")
+        # loop_ms timed POSITION only; bulk_ms covers position and rotation.
+        # Dividing both by the same key count would have halved the loop's
+        # real per-key cost and flattered it by 2x.
+        print("\n      WALL I, MEASURED IN AE  (AE "
+              f"{report.get('ae_version', '?')})")
         print("      layer                 keys   loop ms   bulk ms   "
-              "interp ms   loop/key   bulk/key")
+              "interp ms   loop us/key   bulk us/key   interp us/key")
         print("      -------------------   ----   -------   -------   "
-              "---------   --------   --------")
-        tl = tb = ti = tk = 0
+              "---------   -----------   -----------   -------------")
+        tl = tb = ti = tk = tlk = 0
         for T in report["timings"]:
             k = T["keys"]
-            tk += k
-            tl += max(T["loop_ms"], 0)
-            tb += T["bulk_ms"]
-            ti += T["interp_ms"]
+            lk = k // 2                     # position only
+            tk += k; tlk += lk
+            tl += max(T["loop_ms"], 0); tb += T["bulk_ms"]; ti += T["interp_ms"]
             print(f"      {T['name']:<19}   {k:4d}   {T['loop_ms']:7d}   "
                   f"{T['bulk_ms']:7d}   {T['interp_ms']:9d}   "
-                  f"{T['loop_ms'] / k * 1000:8.1f}us   "
-                  f"{T['bulk_ms'] / k * 1000:8.1f}us")
-        speedup = (tl / tb) if tb else float("inf")
-        check("bulk setValuesAtTimes is worth using",
-              tb <= tl,
-              f"{tk} keyframes: loop {tl} ms, bulk {tb} ms "
-              f"({speedup:.1f}x), interpolation {ti} ms. Total apply "
-              f"{report['total_ms'] / 1000:.2f} s")
-        check("setting interpolation is accounted for, not hidden",
-              True,
-              f"forcing LINEAR cost {ti} ms, "
-              f"{ti / max(tb, 1):.1f}x the value writes themselves -- it is "
-              "per-key too, and it is not optional: AE's default spatial "
-              "auto-bezier would bow the path between our samples")
+                  f"{T['loop_ms'] / lk * 1000:9.0f}     "
+                  f"{T['bulk_ms'] / k * 1000:9.1f}     "
+                  f"{T['interp_ms'] / k * 1000:11.0f}")
+        loop_us = tl / tlk * 1000
+        bulk_us = tb / tk * 1000
+        check("bulk setValuesAtTimes is not a micro-optimisation",
+              bulk_us * 50 < loop_us,
+              f"{loop_us:.0f} us/key looping setValueAtTime vs "
+              f"{bulk_us:.1f} us/key in bulk -- {loop_us / bulk_us:.0f}x. "
+              f"The plan's 12,000-call worry was real: at the loop rate "
+              f"that is {12000 * loop_us / 1e6:.0f} s, and in bulk it is "
+              f"{12000 * bulk_us / 1e6:.1f} s")
+
+        interp_us = ti / tk * 1000
+        check("the real cost is interpolation, not the values",
+              interp_us > 5 * bulk_us,
+              f"forcing LINEAR costs {interp_us:.0f} us/key, "
+              f"{interp_us / bulk_us:.0f}x the bulk write itself "
+              f"({ti / 1000:.1f} s of the {report['total_ms'] / 1000:.1f} s "
+              "run). It is per-key, there is no bulk form of it, and it is "
+              "NOT optional -- AE's default spatial auto-bezier would bow the "
+              "path between our samples. This is Wall I's actual shape: "
+              "writing values is free, making them mean what we meant is not")
     return True
 
 
