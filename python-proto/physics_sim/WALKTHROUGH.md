@@ -347,3 +347,136 @@ which preserves the simplified ring to 6e-16.
 - `a3_paths.py` — the A3 checks and plots
 - `a4_alpha.py` — the A4 checks and plots
 - `png-ae-exports/` — four real AE render-queue exports used as A4's input
+
+---
+
+# A5 — the preview, and whether it can actually catch a bad bake
+
+`python a5_preview.py` → 11/11 checks, `a5_preview.gif`, `a5_contact.png`,
+`a5_checks.png`. Input is A4's four real AE exports, so the preview runs on the
+hardest geometry the sandbox has.
+
+The plan called the preview *"not decoration — it is the only way to see that a
+bake is wrong."* That is a claim, so A5 tests it rather than assuming it: take
+each convention A1–A4 settled, invert it in the baked JSON, render both, and
+**measure** whether the preview shows the difference.
+
+## Why the renderer shares nothing with the solver
+
+`preview.py` imports neither `pymunk` nor `sim`. It reads the keyframe JSON and
+the layer geometry, and applies AE's transform:
+
+```
+world = position + R(theta) * (vertex_layer - anchor)
+```
+
+That separation is the point. `sim.replay_from_keyframes` — the A2/A3/A4
+workhorse — shares assumptions with the solver, so it cannot catch a fault *in
+the conventions themselves*. A second consumer that only ever sees the JSON can.
+
+It also settles what a bake is worth on its own: **nothing**. The schema carries
+no geometry, and it should not — in AE the geometry is already on the layer.
+So a preview takes two inputs, exactly as AE does: the keyframes, plus the
+layers in layer space with their anchors. Phase B reads that second half out of
+the real comp.
+
+Comp space is y-down and so is image space, so there is no flip in the
+rasteriser either — the A1 convention paying out a third time.
+
+## The six faults, and what they cost
+
+Each is one convention, inverted. "Silhouette" is symmetric difference over
+union of the drawn masks — *would an artist see it*, which a vertex distance in
+px does not answer, because 3 px on a 400 px shape and 3 px on a 6 px shape are
+not the same event.
+
+| fault | worst px | silhouette |
+|---|---|---|
+| rotation sign flipped (A1) | 366.70 | 52.7% |
+| comp read as y-up (A1) | 740.00 | 100.0% |
+| rotation in radians (A1) | 366.77 | 48.4% |
+| rotation left wrapped (Wall F) | 366.77 | 21.5% |
+| Position = COM, not anchor (Wall E) | 14.23 | 17.9% |
+| positions rounded to whole px (Wall I) | 2.03 | 2.4% |
+
+All six show. The interesting one is the last: **2 px moves 2.4% of the
+silhouette.** A numeric diff shrugs at half a pixel; the render does not.
+
+## The finding: a preview that draws only keyframes is not a preview
+
+The first run measured two of those six faults at **exactly 0.00 px**, and the
+reason is the most useful thing in this step.
+
+**Wall F is invisible on any still.** Wrapped, 184.88° is written as −175.12° —
+the *same orientation*. Every single frame draws identically. What differs is
+the **tween**, which sweeps 360° the wrong way across the wrap. And that sweep
+lives inside the **one frame interval** containing the crossing: a second pass
+sampling every 8th frame *and* every 8th half-frame still measured 0.00. Nothing
+short of every half-frame finds it.
+
+**Decimation looked free** at stride 2 and 4 — because every frame sampled was a
+multiple of 4, i.e. a keyframe the decimation had kept. The measurement was only
+ever looking at the frames the fault had not touched.
+
+Same lesson twice: **AE plays the tween, not the keyframes.** The fault sampling
+is now every half-frame across the whole range, and the figure renders each
+fault at the frame where it disagrees *most* rather than at a fixed frame —
+picking frame 60 had the whole scene at rest, which showed four faults and
+illustrated two.
+
+## What linear interpolation costs
+
+AE's Linear keyframes chord across a curve. Ground truth for the half-frames
+comes from re-running the same scene at **48 fps with half the substeps**, so
+`dt = 1/(fps·substeps)` is unchanged and it is the same trajectory sampled twice
+as often — not a second simulation.
+
+Doubling *both* (the first thing this file did) quarters dt, and the two runs
+diverged by **142 px** by frame 75. That is two different simulations, and the
+number is large and plausible enough to read as a finding. Worth remembering:
+the check that verifies an interpolation has to hold the integrator fixed.
+
+With that fixed, the prediction splits cleanly:
+
+| | worst px | ballistic frames | worst there |
+|---|---|---|---|
+| Circ | 2.745 | 0 | — |
+| Penta | 5.740 | 0 | — |
+| S | 6.137 | 0 | — |
+| Star | 2.552 | 14 | 0.2126 |
+
+Chord sag on a parabola predicts `g·dt²/8` = **0.2127 px**, and on the frames
+that are genuinely ballistic — second difference of position equal to gravity
+and nothing else — the measurement is **0.2126 px**. Everywhere else it is 29×
+worse. **Contact and rotation are not parabolas**, and that is where a sparse
+bake breaks: not in the fall.
+
+## Wall I: uniform decimation is not a strategy
+
+| stride | keyframes/layer | json | worst px | silhouette |
+|---|---|---|---|---|
+| 1 | 97 | 100.0% | 0.00 | 0.0% |
+| 2 | 49 | 52.1% | 22.94 | 16.7% |
+| 4 | 25 | 28.1% | 36.47 | 27.3% |
+| 8 | 13 | 16.1% | 104.10 | 72.1% |
+| 16 | 7 | 10.2% | 149.38 | 79.7% |
+
+One keyframe per frame is the only exact option, by definition. Merely *halving*
+the keyframes costs 22.9 px for a 48% smaller file — and the error is not spread
+evenly, it is piled up at the contacts, exactly where check 3 said the motion
+stops being a parabola. So Wall I wants **error-driven keyframe reduction**
+(keep a keyframe where dropping it exceeds a pixel budget), not a fixed stride.
+That is a Phase B/C task with a number attached now.
+
+## Determinism, extended to the pixels
+
+A1 proved the JSON is byte-identical run to run. A5 extends that to the render:
+two GIFs of one bake hash the same, and the broken control — moving a single
+vertex by **0.05 px** — changes the digest. So agreement is evidence.
+
+## Files
+
+- `preview.py` — keyframe sampling, AE's transform, Pillow rasteriser, GIF and
+  contact sheet, mask disagreement. No solver imports.
+- `a5_preview.py` — the fault injectors, the measurements, the plots.
+- `a5_preview.gif` — 97 frames of the four AE exports, drawn from the JSON.

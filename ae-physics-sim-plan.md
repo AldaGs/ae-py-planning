@@ -115,8 +115,18 @@ Everything here runs offline against synthetic and AE-exported inputs.
   needed a strict-interior test to survive bridged rings. Slivers are real on
   real contours (aspect 146 vs 28 synthetic) but carry <1% of the mass —
   flagged as a Phase C risk, not solved.
-- **A5. Preview renderer.** Matplotlib or Pillow animation of the baked result.
-  Not decoration — it is the only way to see that a bake is wrong.
+- **A5. Preview renderer.** DONE -- 11/11 checks. A Pillow renderer that shares
+  nothing with the solver (no pymunk, no `sim`), reading the keyframe JSON plus
+  the layer geometry and applying AE's transform. Each A1-A4 convention was
+  inverted in the bake and measured: all six faults are visible, the smallest
+  (whole-pixel rounding, 2 px) still moving 2.4% of the silhouette. The claim
+  holds -- but only when the preview samples BETWEEN keyframes. Wall F's wrapped
+  rotation is invisible on every still (same orientation, wrong tween) and lives
+  inside one frame interval; uniform decimation looked free purely because the
+  sampled frames were the surviving keyframes. Free-fall interpolation error is
+  exactly the predicted chord sag g*dt^2/8 (0.2126 vs 0.2127 px); contact and
+  rotation are 29x worse, so Wall I needs error-driven keyframe reduction, not a
+  fixed stride.
 
 Exit criterion: a PNG or path-dump goes in, a keyframe JSON comes out, the
 preview looks right, and two runs agree exactly.
