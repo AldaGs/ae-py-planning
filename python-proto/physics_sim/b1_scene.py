@@ -422,6 +422,107 @@ def plot(scene, meta, bake, layers):
     print("\n   wrote b1_checks.png")
 
 
+# --------------------------------------------------------------------------
+# 8. The real thing
+# --------------------------------------------------------------------------
+
+AE_EXPORT = "b1_ae_export.json"
+
+
+def test_real_export():
+    """b1_read_shapes.jsx, run on a real comp, read back here.
+
+    Everything above this point was checked against a fixture I wrote, which
+    can only ever confirm that the loader agrees with my own idea of what AE
+    emits. This section is the first time the script's actual output is in the
+    loop, so it is the only part of B1 that can falsify the schema.
+
+    What it CANNOT do by itself is prove the group-transform composition. If
+    every group in the comp happens to sit at identity, a broken composition
+    and a correct one produce the same file. So this reports the evidence --
+    where each layer lands in comp space -- and `b1_ae_frame0.png` is rendered
+    for comparison against the comp itself. Matching pixels is the proof;
+    validating is only the absence of an obvious wound.
+    """
+    print("\n8. THE REAL EXPORT  (b1_read_shapes.jsx, run in AE)")
+    if not os.path.exists(AE_EXPORT):
+        print(f"      {AE_EXPORT} not present -- skipping")
+        return None
+
+    with open(AE_EXPORT, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    problems = scene_io.validate(doc)
+    check("the script's own output validates",
+          problems == [],
+          f"{len(doc['layers'])} layers out of comp {doc['comp']['name']!r} "
+          f"({doc['comp']['width']}x{doc['comp']['height']} @ "
+          f"{doc['comp']['fps']}fps), {len(doc.get('warnings', []))} warnings "
+          "from the script"
+          if not problems else "; ".join(problems[:3]))
+
+    scene, meta = load_scene(doc)
+    w, h = doc["comp"]["width"], doc["comp"]["height"]
+    print("      layer                 paths  verts  curved  parts   "
+          "comp-space bbox")
+    print("      -------------------   -----  -----  ------  -----   "
+          "------------------------")
+    inside = True
+    for lay, body, m in zip(doc["layers"], scene.bodies, meta["layers"]):
+        nv = sum(len(sh["vertices"]) for sh in lay["paths"])
+        curved = sum(1 for sh in lay["paths"] for t in sh["inTangents"]
+                     if t != [0, 0])
+        pts = [(x + body.position[0], y + body.position[1])
+               for part in body.parts for x, y in part]
+        x0 = min(p[0] for p in pts); x1 = max(p[0] for p in pts)
+        y0 = min(p[1] for p in pts); y1 = max(p[1] for p in pts)
+        inside = inside and -w < x0 and x1 < 2 * w and -h < y0 and y1 < 2 * h
+        print(f"      {m['name']:<19}   {len(lay['paths']):5d}  {nv:5d}  "
+              f"{curved:6d}  {m['parts']:5d}   "
+              f"x {x0:7.1f}..{x1:7.1f}  y {y0:6.1f}..{y1:6.1f}")
+
+    check("every layer lands on the comp, not off in group space",
+          inside,
+          f"all {len(scene.bodies)} bodies sit within the {w}x{h} frame once "
+          "the anchor is subtracted and Position added. A composition that "
+          "dropped a group transform would offset a layer by that "
+          "transform -- this is evidence, not proof, since identity groups "
+          "would look the same")
+
+    curved_total = sum(1 for lay in doc["layers"] for sh in lay["paths"]
+                       for t in sh["inTangents"] if t != [0, 0])
+    check("real paths are curved, so flattening is actually exercised",
+          curved_total > 0,
+          f"{curved_total} vertices carry non-zero tangents -- the fixture's "
+          "squares could not have tested the bezier path")
+
+    ids = [m["id"] for m in meta["layers"]]
+    b1 = json.dumps(bake_scene(load_scene(doc)[0], ids), sort_keys=True)
+    b2 = json.dumps(bake_scene(load_scene(doc)[0], ids), sort_keys=True)
+    check("a real comp bakes deterministically",
+          b1 == b2, f"{len(b1)} bytes, identical over two runs")
+    return doc, scene, meta
+
+
+def render_real_frame0(doc, scene, meta):
+    """Frame 0 at comp resolution. THIS is what confirms the read: it should
+    be pixel-for-pixel where the comp is, and no measurement here can say so
+    -- only looking at both can."""
+    ids = [m["id"] for m in meta["layers"]]
+    short = copy.deepcopy(scene)
+    short.duration_frames = 1
+    bake = bake_scene(short, ids)
+    layers = [preview.PreviewLayer(m["id"], m["name"], b.parts, b.anchor)
+              for m, b in zip(meta["layers"], scene.bodies)]
+    ps = preview.PreviewScene(doc["comp"]["width"], doc["comp"]["height"],
+                              [tuple(tuple(p) for p in s)
+                               for s in doc.get("statics", [])],
+                              background=(255, 255, 255))
+    img = preview.render_frame(bake, layers, ps, 0.0, 1.0)
+    img.save("b1_ae_frame0.png")
+    print(f"\n   wrote b1_ae_frame0.png ({img.size[0]}x{img.size[1]}) -- "
+          "compare it against the comp at frame 0")
+
+
 if __name__ == "__main__":
     print("B1 -- ae-physics-scene/1, checked without AE")
     test_group_transform()
@@ -433,11 +534,19 @@ if __name__ == "__main__":
     test_scene_is_not_a_document()
     layers = test_end_to_end(scene, meta, bake)
     plot(scene, meta, bake, layers)
+    real = test_real_export()
+    if real:
+        render_real_frame0(*real)
 
     passed = sum(1 for _, ok, _ in results if ok)
     print(f"\n{passed}/{len(results)} checks passed")
     for name, ok, _ in results:
         if not ok:
             print(f"  FAILED: {name}")
-    print("\n   NOT verified here: b1_read_shapes.jsx. It needs AE, and the "
-          "first real run is expected to find something.")
+    if real:
+        print("\n   b1_read_shapes.jsx HAS run in AE and its output is checked "
+              "above. What no check here can settle is whether the read is "
+              "COMPLETE -- compare b1_ae_frame0.png against the comp.")
+    else:
+        print("\n   NOT verified here: b1_read_shapes.jsx. It needs AE, and "
+              "the first real run is expected to find something.")
