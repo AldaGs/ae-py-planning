@@ -1020,7 +1020,8 @@
           ]
         ]
       },
-      "name": "L_spin"
+      "name": "L_spin",
+      "static": false
     },
     {
       "anchor_offset": [
@@ -2036,7 +2037,8 @@
           ]
         ]
       },
-      "name": "L_drop"
+      "name": "L_drop",
+      "static": false
     }
   ],
   "schema": "ae-physics-bake/2",

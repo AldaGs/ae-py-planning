@@ -762,3 +762,107 @@ apply silently moves every id after it. So the script also checks the *name* at
 that index and aborts if it disagrees, writing nothing. The name is not the key
 (B1 established that duplicate names are AE's default); it is a cheap way to
 notice that the comp has moved under us.
+
+---
+
+# B3 — the loop, and the failure a loop invents
+
+`python b3_checks.py` → 15/15. Files: `b3_loop.py`, `b3_checks.py`.
+
+```
+(in AE)  b1_read_shapes.jsx     comp  -> scene.json
+         python b3_loop.py scene.json -> bake.json + preview
+(in AE)  b2_apply_bake.jsx      bake  -> keyframes on the layers
+```
+
+The plan called this step *"ugly, manual, and it is the entire product
+working"*, which is exactly right. There is no new physics in B3. What is new is
+that the middle is **one command with parameters** rather than constants edited
+in a checks file — a physics tool you cannot re-run with different gravity is not
+a tool, it is a demo.
+
+## Staleness: the wall that only appears once there is a loop
+
+A1–A5 could not have found this, and neither could B1 or B2 alone. It exists
+because the loop is made of files carried by hand between two applications.
+
+**A stale bake looks completely fine.** It is well-formed, it validates, the
+schema matches, the layer names match — and it silently replaces good animation
+with keyframes computed from geometry that no longer exists. There is nothing to
+notice.
+
+So every bake now carries a `source` block: the scene file's SHA-256, the comp's
+name and size and fps, the layer ids and names it was built from, and the
+settings used. Two guards read it — `b3_loop.py --check` offline, and
+`b2_apply_bake.jsx` in AE, which refuses to write if the comp identity
+disagrees.
+
+The check worth having is the *small* one. A different comp fails on five counts
+at once — hash, name, width, height, layer list — and any one alone might be a
+coincidence. But edit **one vertex by 3 px** and re-save: same comp, same size,
+same names, still validates, and **nothing but the hash distinguishes it.** That
+is the bake that would have quietly overwritten a day's work.
+
+A bake with no `source` block at all (B2's `b2_bake.json` predates this) reports
+as *unverifiable* rather than as fine.
+
+## Pinned layers
+
+`--static NAME` (repeatable, by name or id) makes a layer immovable — a ramp, a
+peg, a floor drawn as a shape layer. Static bodies are a small change in `sim.py`
+(`pymunk.Body.STATIC`, no velocity) but the decision that matters is downstream:
+
+**A pinned layer gets no keyframes at all.** Not a constant, none. Writing even a
+constant Position would replace the user's own placement with our copy of it, and
+then silently undo any later nudge they made by hand. `b2_apply_bake.jsx` skips
+those layers entirely — it does not even clear what is there, because the user
+placed it and we have nothing to say about it.
+
+`--static` matching nothing is an **error**, not a shrug: a typo that pinned
+nothing would look exactly like a scene where pinning did not help.
+
+## The knobs are wired to something
+
+A knob connected to nothing looks exactly like a knob whose effect you cannot
+see, so each is measured against a prediction:
+
+- **Gravity.** 100 px of fall takes 11 frames at 9.8 m/s², and 27 at 1.6
+  (lunar). `sqrt(9.8/1.6) = 2.47` predicts 27.2.
+- **Elasticity.** Total vertical travel 201 px at 0.2 vs 425 px at 0.85, coming
+  to rest at frame 21 vs 91.
+- **ppm.** Settles at frame 21 at ppm=100 and 42 at ppm=25 — fewer pixels per
+  metre makes the comp a bigger room, exactly as A1 measured.
+
+Two things came out of writing those.
+
+**The walls needed the surface settings too.** `--elasticity` originally set only
+the bodies, and Chipmunk combines elasticity *multiplicatively* — so a bouncy
+body on our default 0.2 floor barely bounces, no matter what the body says. The
+walls are our invention rather than the user's layers, so they now take the same
+settings.
+
+**And a metric lied again.** The first elasticity check measured rebound from the
+*deepest* point reached — which is the final resting place, so a bouncier body
+scored **0.0 px** and the check failed while the physics was perfectly fine.
+Total vertical travel is monotonic in bounciness and has no local-extremum trap.
+That is twice now (B1's area-vs-extent was the first) that a *measurement* was
+wrong rather than the thing measured. Worth a standing suspicion.
+
+## The escape guard, promoted
+
+B2 found a layer leaving the comp by 838,591 px by accident, while looking at
+something else. In B3 it cannot happen quietly: `b3_loop.py` computes escapes,
+**refuses to write the bake**, exits 3, and names the layer and the frame.
+`--allow-escapes` overrides it, because the guard is a default and not a policy —
+it is the user's comp.
+
+## What the checks are actually checking
+
+Not the physics — the **plumbing**, since B1 and B2 verified the two ends against
+real AE. And they run the real command line in a subprocess rather than calling
+`run()` in-process, because B3's whole claim is that the middle of the loop is
+one command, and testing the functions would not test the tool.
+
+Determinism now covers the entire loop rather than just the solver: two runs of
+the same command produce identical bytes apart from the timestamp, and a 1e-9
+change to gravity produces different ones.

@@ -1350,7 +1350,8 @@
           ]
         ]
       },
-      "name": "box_a"
+      "name": "box_a",
+      "static": false
     },
     {
       "anchor_offset": [
@@ -2696,7 +2697,8 @@
           ]
         ]
       },
-      "name": "box_b"
+      "name": "box_b",
+      "static": false
     },
     {
       "anchor_offset": [
@@ -4042,7 +4044,8 @@
           ]
         ]
       },
-      "name": "ball"
+      "name": "ball",
+      "static": false
     }
   ],
   "schema": "ae-physics-bake/2",

@@ -321,9 +321,11 @@ def load_scene(doc, flatten_tol=FLATTEN_TOL, simplify_tol=SIMPLIFY_TOL):
             density=float(lay.get("density", 1.0)),
             friction=float(lay.get("friction", 0.6)),
             elasticity=float(lay.get("elasticity", 0.2)),
+            static=bool(lay.get("static", False)),
         ))
         meta.append({"id": lay["id"], "name": lay["name"],
-                     "parts": len(parts)})
+                     "parts": len(parts),
+                     "static": bool(lay.get("static", False))})
 
     scene = sim.Scene(
         width=int(comp["width"]), height=int(comp["height"]),

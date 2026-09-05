@@ -89,6 +89,14 @@ class PolyBody:
     density: float = 1.0
     friction: float = 0.6
     elasticity: float = 0.2
+    static: bool = False
+    """Pinned. A ramp, a peg, a floor drawn as a shape layer.
+
+    A static body has infinite mass and never moves, so B2 writes no keyframes
+    for it -- which matters: baking a constant Position onto a layer the user
+    deliberately placed would overwrite their placement with our copy of it,
+    and any later nudge in AE would silently be undone by the keyframes.
+    """
 
 
 @dataclass
@@ -151,7 +159,13 @@ def _build_poly(spec: PolyBody, ppm: float) -> Handle:
     parts_m = [[(x / ppm, y / ppm) for x, y in p] for p in spec.parts]
     mass, com_m, moment = geom.compound_mass_properties(parts_m, spec.density)
 
-    body = pymunk.Body(mass, moment)
+    # A static body still needs a COM: the anchor transform is geometry, not
+    # dynamics, and the preview draws a pinned layer through the same path as
+    # a moving one.
+    if spec.static:
+        body = pymunk.Body(body_type=pymunk.Body.STATIC)
+    else:
+        body = pymunk.Body(mass, moment)
     # Shape vertices live relative to the COM, because that is where the
     # solver's body origin is.
     local_m = [
@@ -167,8 +181,9 @@ def _build_poly(spec: PolyBody, ppm: float) -> Handle:
     body.position = (spec.position[0] / ppm + d[0],
                      spec.position[1] / ppm + d[1])
     body.angle = theta
-    body.velocity = (spec.velocity[0] / ppm, spec.velocity[1] / ppm)
-    body.angular_velocity = math.radians(spec.angular_velocity_deg)
+    if not spec.static:
+        body.velocity = (spec.velocity[0] / ppm, spec.velocity[1] / ppm)
+        body.angular_velocity = math.radians(spec.angular_velocity_deg)
     for s in shapes:
         s.friction = spec.friction
         s.elasticity = spec.elasticity
@@ -332,8 +347,14 @@ def bake(scene: Scene, ids: list[int] | None = None) -> dict:
                 "id": ids[i],
                 "name": h.spec.name,
                 "index": i + 1,
+                "static": bool(getattr(h.spec, "static", False)),
                 "anchor_offset": [round(v, 6) for v in h.anchor_offset],
-                "keyframes": tracks[i],
+                # A pinned layer gets NO keyframes. Writing a constant would
+                # replace the user's own placement with our copy of it, and
+                # then quietly undo any later nudge they make in AE.
+                "keyframes": ({"position": [], "rotation": []}
+                              if getattr(h.spec, "static", False)
+                              else tracks[i]),
             }
             for i, h in enumerate(handles)
         ],

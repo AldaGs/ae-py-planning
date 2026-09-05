@@ -196,8 +196,27 @@ preview looks right, and two runs agree exactly.
   a rolling layer leave the world and reach 838,591 px, which was about to be
   written into a real project -- the reader now emits a closed box and
   `escapes()` guards every bake.
-- **B3.** Close the loop: read comp → run the Python sandbox on the file →
-  apply. Ugly, manual, and it is the entire product working.
+- **B3. DONE** -- 15/15 checks. `b3_loop.py` is the middle of the loop as ONE
+  command with real parameters (`--gravity --ppm --substeps --frames --friction
+  --elasticity --static --no-walls`), verified against predictions: lunar
+  gravity stretches a 100 px fall from 11 frames to 27 where sqrt(9.8/1.6)
+  predicts 27.2. Adds **pinned layers** (`--static`, which get NO keyframes --
+  writing even a constant would overwrite the user's own placement) and promotes
+  B2's escape finding to a refusal (exit 3).
+
+  **The wall B3 exposes is STALENESS**, and only a loop could have exposed it: a
+  bake made from a different comp, or from this one before it was edited, is
+  well-formed, validates, has matching layer names, and silently destroys good
+  animation. Every bake now carries a `source` block (scene SHA-256, comp
+  identity, layer list, settings); `--check` guards it offline and
+  `b2_apply_bake.jsx` refuses to write on a comp mismatch. The telling case is
+  the small one: edit ONE vertex by 3 px and nothing but the hash can tell.
+
+**K. A hand-carried loop goes stale.** **FOUND AND GUARDED IN B3.** Not a
+physics wall -- a plumbing one, and invisible until the loop existed. See B3.
+Phase C inherits it: a panel removes the hand-carried files but not the problem,
+since a user can still edit a comp between simulate and apply. The `source`
+block is the mechanism; the panel should re-read rather than trust it.
 
 ## Phase C — The panel
 

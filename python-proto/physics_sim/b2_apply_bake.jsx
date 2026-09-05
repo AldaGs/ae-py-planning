@@ -166,7 +166,24 @@ if (bake.schema !== BAKE_SCHEMA) {
  * every id after it. So the name is checked too: it is not a key, it is a
  * tripwire, and a mismatch aborts rather than writing keyframes onto whatever
  * happens to be sitting at that index now. */
+/* B3 added a `source` block to every bake: the scene file's hash, the comp's
+ * identity, and the settings used. A hand-carried loop's worst failure is
+ * applying a bake made from a DIFFERENT comp, or from this one before it was
+ * edited -- such a bake is well-formed, validates, has matching layer names,
+ * and silently replaces good animation with keyframes computed from geometry
+ * that no longer exists. Comp identity is the half AE can check. */
 var i, j, mismatches = [];
+if (bake.source && bake.source.comp) {
+    var sc = bake.source.comp;
+    if (sc.name !== comp.name) {
+        mismatches.push("bake was made from comp '" + sc.name +
+                        "', this is '" + comp.name + "'");
+    }
+    if (sc.width !== comp.width || sc.height !== comp.height) {
+        mismatches.push("bake was made at " + sc.width + "x" + sc.height +
+                        ", this comp is " + comp.width + "x" + comp.height);
+    }
+}
 for (i = 0; i < bake.layers.length; i++) {
     var bl = bake.layers[i];
     if (bl.id < 1 || bl.id > comp.numLayers) {
@@ -202,6 +219,15 @@ var tStart = now();
 try {
 for (i = 0; i < bake.layers.length; i++) {
     var L = bake.layers[i];
+    /* A pinned layer has no keyframes by design. Skip it entirely -- do not
+     * even clear -- because the user placed it and we have nothing to say. */
+    if (L.static || L.keyframes.position.length === 0) {
+        report.timings.push({id: L.id, name: L.name, keys: 0,
+                             loop_ms: 0, bulk_ms: 0, interp_ms: 0});
+        report.layers.push({id: L.id, name: L.name, pos_keys: 0, rot_keys: 0,
+                            stored: [], tween: []});
+        continue;
+    }
     var layer = comp.layer(L.id);
     var pos = layer.property("ADBE Transform Group").property("ADBE Position");
     var rot = layer.property("ADBE Transform Group").property("ADBE Rotate Z");
