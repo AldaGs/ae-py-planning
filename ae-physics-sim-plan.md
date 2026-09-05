@@ -17,7 +17,7 @@ the sandbox is where the walls get found.
 | Body sources | Shape-layer paths **first**, rendered alpha **required** later | Paths are readable from script; alpha is not (see Wall A) |
 | Baked channels | Position + rotation | A rigid solver outputs nothing else. Scale is deferred — see below |
 | Prototype language | Python + numpy (+ pymunk) | Existing habit, plottable, no AE round-trip |
-| Eventual UI host | CEP panel (decide for real at Phase C) | Dockable, `evalScript` bridge exists, Chromium runs WASM |
+| Eventual UI host | **Tauri shell + AEGP bridge** (decided at Phase C, 2026-09-04) | Lives outside AE as its own suite; the AEGP is required by Wall A regardless, so CEP would be a second bridge thrown away in Phase D |
 
 **On scale:** rigid-body dynamics produce a position and an orientation, full
 stop. Scale keyframes can only come from (a) a faked squash-and-stretch pass
@@ -218,18 +218,122 @@ Phase C inherits it: a panel removes the hand-carried files but not the problem,
 since a user can still edit a comp between simulate and apply. The `source`
 block is the mechanism; the panel should re-read rather than trust it.
 
-## Phase C — The panel
+## Phase C — The application
 
-Port the solver and geometry pipeline to whatever runs in the panel (Rapier via
-WASM being the likely pick), rebuild B1/B2 as `evalScript` calls, add the
-viewport and the parameter UI. CEP vs UXP gets re-decided here with the AE
-version actually in front of us, not from memory.
+**The architecture is decided: a Tauri shell plus an AEGP bridge. No CEP, no
+UXP.** Decided 2026-09-04, after Phases A and B, reversing the scope table's
+placeholder above.
 
-## Phase D — The AEGP
+### Why the placeholder was wrong
 
-Native plugin that renders a layer and hands its alpha contour to the panel.
-This is what unlocks alpha bodies inside AE. Deliberately last: it is the most
-expensive component and Phase A already proved the algorithm it needs to run.
+The table picked a CEP panel for two reasons: it is dockable, and the
+`evalScript` bridge already exists. Both are void.
+
+- **Docking is not wanted.** The tool is to live *outside* After Effects as a
+  standalone suite with its own settings. A CEP panel is an AE-owned window; it
+  could never have been outside AE in that sense.
+- **`evalScript` is not the only bridge.** `AEGP_ExecuteScript` runs the same
+  ExtendScript from native code.
+
+And one reason that outweighs both:
+
+- **The AEGP has to exist anyway.** Wall A is unavoidable — neither
+  ExtendScript nor CEP can read rendered pixels, so alpha bodies require an
+  AEGP calling `AEGP_RenderAndCheckoutFrame`. Building CEP for Phase C means
+  building a bridge that Phase D throws away. **One bridge, not two.**
+
+### Why this shape specifically
+
+It is the architecture `pieFX` locked after its own Phase 0, on the same host,
+by the same hands — two processes, the AEGP owning all AE access on AE's UI
+thread and a Tauri shell owning all UI, talking small JSON over a local socket
+or named pipe. The frightening unknown was retired there by measurement, not
+argument: **an out-of-process topmost window wins AE's z-order, and layer
+selection is document state rather than focus state**, so the external window
+can take focus like any other. Verified on Windows and macOS. See
+`AldaGs/pieFX`, `ARCHITECTURE.md` and `SPIKES.md`.
+
+**It deletes work rather than adding it.** The previous draft of this section
+said "rebuild B1/B2 as `evalScript` calls". With an AEGP bridge they are not
+rebuilt at all — the AEGP calls `AEGP_ExecuteScript` on the same ES3 files
+already verified against real AE in B1 and B2. Those scripts stop being
+scaffolding and become the product's AE layer.
+
+**Tauri over Electron** because the toolchain and the architecture experience
+already exist here. Electron's real advantage is Node in-process, which matters
+when the bridge *is* Node; here the bridge is a socket to a C++ plug-in.
+
+### The solver: deliberately not decided yet
+
+Rapier native in the Tauri backend is the obvious end state, and the earlier
+note about "Rapier via WASM" is obsolete — Tauri runs Rust natively, no WASM.
+But switching Chipmunk to Rapier discards A1's falsified integrator finding and
+the measured ppm 10–1000 band, both of which are engine-specific, and the
+geometry pipeline (`aepath`, `alpha_contours`, `decompose`, `geom`, `scene_io`)
+is ~1,200 lines of *verified* code that would need porting **and** re-verifying.
+
+So the first version ships **Python as a Tauri sidecar**, keeping everything
+Phases A and B proved, and the port happens when there is a reason rather than
+on principle. The cost is a PyInstaller bundle, which is a real wart for a
+"complete suite". The exit stays open: only `alpha_contours` touches numpy.
+
+### C0 — spikes, before any product code
+
+Same gate as pieFX's Phase 0: throwaway spikes that answer the questions the
+whole design rests on. Each is pass/fail on a measurement.
+
+- **C0.1 — the bridge.** An AEGP opens a local socket, receives
+  `{"cmd":"read_scene"}`, runs B1's reader through `AEGP_ExecuteScript`, and
+  returns the scene JSON down the socket instead of through a save dialog.
+  *Pass:* the JSON that arrives over the socket is byte-identical to what the
+  save dialog writes today. pieFX already has AEGP hello-world, script
+  execution and the socket, so this is assembly rather than invention.
+  Watch for `AEGP_ExecuteScript`'s empty-but-non-NULL error handle.
+
+- **C0.2 — payload size.** Can `AEGP_ExecuteScript` accept a 148 KB bake as a
+  string argument, or must the script read a temp file? Genuinely unknown, and
+  the answer shapes the protocol. B2's real bake is the test case: 6,486
+  keyframes, 148 KB compact. *Pass:* either it takes the string, or the
+  temp-file fallback round-trips with the same verification B2 already has.
+  Measure the size at which it breaks, not just whether it works.
+
+- **C0.3 — keyframes from native code.** B2 measured the real cost of an apply:
+  values are free in bulk (19.6 us/key) but forcing LINEAR interpolation costs
+  853 us/key with **no bulk form**, 5.5 s for one 45 s comp. Can
+  `AEGP_KeyframeSuite` set values *and* interpolation faster than ExtendScript
+  can? *Pass:* a measured us/key for the native path against B2's numbers on
+  the same comp. This is Wall I's only remaining lever, and if it wins, the
+  ExtendScript apply becomes a fallback rather than the path.
+
+Gate: C0.1 must pass for the architecture to stand at all. C0.2 shapes the
+protocol either way. C0.3 is an optimisation — a fail costs 5.5 s per apply and
+nothing else.
+
+### C1 onwards, once the gate is green
+
+- **C1.** The shell: Tauri window, scene list, the B3 parameter set as real
+  controls, settings persisted.
+- **C2.** The viewport: `preview.py`'s renderer becomes the canvas, scrubbing
+  the bake before it is applied. A5's argument — a bake is only checkable by
+  looking at it — becomes the main surface rather than a contact sheet.
+- **C3.** Staleness (**Wall K**) survives the panel. A GUI removes the
+  hand-carried files but not the problem: a user can still edit the comp
+  between simulate and apply. The `source` block is the mechanism, and the
+  panel should **re-read and compare rather than trust it**.
+- **C4.** The sliver risk A4 flagged and did not solve (real contours reach
+  aspect 146) gets revisited against whatever solver C ends up running.
+
+## Phase D — The AEGP renders
+
+**Narrowed by Phase C's decision.** The AEGP itself now arrives in C0 as the
+bridge, so what is left for Phase D is the expensive half it was always really
+about: `AEGP_RenderAndCheckoutFrame`, handing a layer's rendered alpha to the
+contour pipeline, and thereby unlocking alpha bodies (Wall A).
+
+Still deliberately last, for the original reason: it is the most expensive
+component and A4 already proved the algorithm it needs to run, on four real AE
+exports. The bridge landing early does not change that -- a socket and a script
+call are cheap; rendering a layer out of the middle of a render queue is not.
 
 ---
 
@@ -239,3 +343,13 @@ expensive component and Phase A already proved the algorithm it needs to run.
   extraction and the bake transform are where the time goes.
 - pymunk in the sandbox is a learning vehicle. The engine API will not transfer
   to Phase C; the geometry pipeline and the bake math will. Build accordingly.
+  **Amended by Phase C's decision:** shipping Python as a Tauri sidecar means
+  even that transfer is deferred, and it should be -- Phases A and B did not
+  just write the geometry pipeline, they *verified* it, and a port throws the
+  verification away along with the code.
+- Two of the corrections in this project were to a MEASUREMENT rather than to
+  the thing measured: B1 scored a wrecked path by area, which a self-crossing
+  loop cancels to nothing, and B3 measured rebound from the deepest point,
+  which is the final resting place. Both read as "the code is fine" and "the
+  code is broken" respectively, and both were wrong. When a check surprises,
+  suspect the metric before the mechanism.
