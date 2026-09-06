@@ -27,6 +27,135 @@ more is promised now.
 
 ---
 
+## Feature scope — measured against Newton 4 and PhysicDesk 2
+
+Researched 2026-09-05. Newton 4's surface is taken from its official user guide
+and is precise; PhysicDesk 2's comes from vendor blurbs and search results
+because every one of its pages refuses automated fetches, so treat that column
+as directionally right rather than exhaustive.
+
+| | Newton 4 | PhysicDesk 2 | Here, today |
+|---|---|---|---|
+| Body types | 7 (static, kinematic, dynamic, dormant, AEmatic, dead, triggermatic) | 3 (dynamic, static, animated) | 2 (dynamic, static) |
+| Joints | 7 (distance, pivot, piston, spring, wheel, blob, weld) | 5 (pivot, weld, spring, wheel, rope) | none |
+| Forces | magnetism, buoyancy, grenade, per-body gravity scale | zones: wind, magnet, portal, explosion | global gravity only |
+| Footage / precomp layers | **interpreted as rectangles** | unclear | **true alpha silhouette** (A4, proven) |
+| Viewport | OpenGL preview, 5 tools, play/step/loop | real-time in viewport | contact sheets |
+| Output | keyframes to a new or existing comp | keyframes plus generated shape layers | keyframes, in place |
+| Liquid / soft bodies / particles | no | **yes, and it is the headline** | no |
+| Squash and stretch | no | yes | deferred by decision |
+
+### The distinction that matters for planning
+
+**Some features change the document model and some are additive.** The first
+kind has to be designed in now even if it is not implemented for a year; the
+second can arrive feature by feature without disturbing anything. Sorting the
+competitive feature list along that axis is more useful than ranking it by
+popularity.
+
+### Tier 0 — schema slots that must exist before C1
+
+Not implementations. Slots. Everything here reshapes `ae-physics-scene/1` or
+`ae-physics-bake/2` if it is retrofitted, so the next schema version should
+carry the shape even where the value is always empty.
+
+1. **`joints[]` as a top-level array.** A joint is a relation between two
+   bodies with anchor points in comp space, not a property of a layer. Both
+   competitors treat joints as core, and a physics tool without them is a toy.
+2. **`zones[]`, same argument.** Force fields, wind, magnets, explosions.
+3. **Animated (kinematic) bodies.** Newton's kinematic and AEmatic, PhysicDesk's
+   "animated": a layer driven by its OWN existing AE keyframes that still shoves
+   dynamic bodies. B1 currently reads time 0 only and *warns* about animation,
+   so this means layers carrying optional input keyframe tracks. Heavily used in
+   real work -- it is how a hand-animated hand knocks over a physics stack.
+4. **The bake carries velocity and contact events.** Newton exports contacts as
+   keyframes. This is the enabler for squash and stretch, sound sync and
+   triggers WITHOUT re-simulating. Two extra channels now; a re-architecture
+   later.
+5. **Bake target: a new comp, or in place.** Newton exports to either. We
+   currently overwrite the source layer's Position and Rotation, which is
+   destructive and not what a careful user expects.
+6. **One input layer may produce N output layers.** This is Wall J's island
+   split and fracture, and they are the same capability. See below.
+7. **Collision groups and a collide-with mask.** Newton has five groups and an
+   interaction matrix. Trivial per-body fields; impossible to bolt on cleanly if
+   the schema has no slot for them.
+
+### Tier 1 — table stakes, but additive
+
+Per-body damping (linear and angular), gravity scale, fixed rotation, initial
+linear and angular velocity, bounciness and friction (present), convex-hull
+approximation toggle, time divider for slow motion, substep control (present),
+simulation frame range. Each is a scalar plus a control. None of them threaten
+the model, so none of them belong in the critical path.
+
+Workflow, likewise additive but disproportionately valuable in an app that owns
+its own storage: scene save/load, snapshots, a record pool of takes, autosave,
+presets, and Newton's per-property Randomize (a genuinely good motion-design
+touch).
+
+### Tier 2 — where this can be better rather than equal
+
+- **Alpha-derived bodies for any layer type.** Newton interprets precomp and
+  footage layers **as rectangles**. Phase D's path gives true silhouettes for
+  footage, precomps, images and text alike, and A4 already validated that
+  pipeline on four real AE exports, holes and islands included. This reframes
+  Phase D: not the expensive last chore, but the reason to choose this tool. It
+  is also the only honest answer to text layers, which are otherwise unreadable
+  from script.
+- **The external app.** A record pool, a scene library and settings that outlive
+  a comp are natural in an application and awkward in a panel.
+- **Correctness as a feature.** The round trip is verified to 0.0000 px with
+  straight-line tweens, and A5's preview provably catches the faults that hide
+  between keyframes. Neither competitor claims anything of the sort, and "the
+  bake is exactly the simulation" is a claim that can be backed with numbers.
+
+### Non-goals, chosen deliberately
+
+Liquid, soft bodies and particle systems. PhysicDesk's liquid engine is a
+different solver with a different output, and chasing it would double the
+project while abandoning what this one is actually good at. Squash and stretch
+is the near-miss exception: it is cheap **if** the bake carries contacts and
+velocity, which is why Tier 0 item 4 exists.
+
+### Fracture — in, as pre-fracture only
+
+Judged separately because it looks expensive and is not.
+
+**The physics is free**: a shard is a `PolyBody` and the solver does not change.
+
+**The geometry is small and reuses verified code.** Voronoi cells are convex,
+and every body is already decomposed into convex parts, so fracture is "clip
+each convex part against each cell, group by cell" -- convex against convex,
+which Sutherland-Hodgman does exactly in about forty lines with no degenerate
+cases. Mass, COM and moment then come from `geom` untouched.
+
+**The expensive part is shared.** Fracture needs one layer to become N layers,
+which is Tier 0 item 6, which is also Wall J's island split. Build it once, get
+both. The clean mechanism is to **duplicate the source layer N times and give
+each a mask shaped like its shard**: it works for footage, precomps, text and
+shape layers alike, preserves the original appearance exactly, and a mask is
+just a path -- the same data already read and written. Each shard's anchor moves
+to its own COM with Position compensated, which is A2's transform, verified.
+
+**Impact fracture is out**, and that is the honest limit. Shattering on impact
+changes the body set mid-simulation, and the bake model is N bodies with N fixed
+tracks for the whole comp. A shard that does not exist until frame 40 needs a
+birth time, which means in-point or opacity keyframes and a real schema change.
+Pre-fracture -- shatter at frame 0, pieces resting in place until disturbed --
+covers most real use and costs none of that.
+
+**The number to watch is piece count.** Fifty shards over 300 frames is 30,000
+keyframes, and B2 measured interpolation at 853 us/key with no bulk form: 25
+seconds of interpolation alone, plus fifty layers to create. Fracture is what
+turns spike C0.3 from an optimisation into a requirement.
+
+Fracture is scene *authoring*, not solving -- it turns one layer into N bodies
+before the simulation runs. So it can be prototyped and verified offline in the
+Python sandbox exactly like A1 through A5, and it should be.
+
+---
+
 ## The walls we expect to hit
 
 The sandbox exists to hit these early. Listed so we can tell "found it" from
@@ -312,7 +441,11 @@ nothing else.
 ### C1 onwards, once the gate is green
 
 - **C1.** The shell: Tauri window, scene list, the B3 parameter set as real
-  controls, settings persisted.
+  controls, settings persisted. **Ships `ae-physics-scene/2` and
+  `ae-physics-bake/3` carrying every Tier 0 slot** (joints, zones, animated
+  input tracks, contacts and velocity in the bake, bake target, N-outputs-per
+  -layer, collision groups) even where the arrays are always empty. Retrofitting
+  any of those reshapes every document; adding a scalar never does.
 - **C2.** The viewport: `preview.py`'s renderer becomes the canvas, scrubbing
   the bake before it is applied. A5's argument — a bake is only checkable by
   looking at it — becomes the main surface rather than a contact sheet.
@@ -322,6 +455,12 @@ nothing else.
   panel should **re-read and compare rather than trust it**.
 - **C4.** The sliver risk A4 flagged and did not solve (real contours reach
   aspect 146) gets revisited against whatever solver C ends up running.
+- **C5.** One layer becomes N: the output capability that Wall J's island split
+  and pre-fracture both need. Duplicate the source layer, mask each copy with a
+  shard path, move each anchor to its own COM with Position compensated. Prove
+  the geometry offline in the sandbox first -- Voronoi cells clipped against the
+  existing convex parts by Sutherland-Hodgman -- because fracture is scene
+  authoring, not solving, and the sandbox is still where things can be measured.
 
 ## Phase D — The AEGP renders
 
