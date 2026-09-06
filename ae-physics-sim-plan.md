@@ -207,11 +207,22 @@ orientation -- and the 360-degree backwards sweep it causes lives entirely
 inside the one frame interval containing the crossing. Any check or preview
 that samples only keyframed frames will score this fault at exactly 0.00 px.
 
-**G. Timestep vs frame rate.** A stable solver wants a small fixed dt with
-substeps; AE wants one sample per frame at comp fps. These are different clocks.
+**G. Timestep vs frame rate.** **CLOSED IN A1.** A stable solver wants a small
+fixed dt with substeps; AE wants one sample per frame at comp fps. Reconciled by
+`dt = 1/(fps * substeps)`, so every frame lands exactly on a substep boundary and
+nothing is ever interpolated inside the solver -- which removes a whole class of
+run-to-run difference. A5 then measured what AE's LINEAR interpolation costs
+*between* those samples: exactly the predicted chord sag `g*dt^2/8` in free fall
+(0.2126 px measured vs 0.2127 predicted) and 29x worse at contacts, where the
+motion stops being a parabola.
 
-**H. Determinism.** A bake that differs between runs is unusable. Every sandbox
-sim gets run twice and compared exactly.
+**H. Determinism.** **CLOSED IN A1 and held since.** A bake that differs between
+runs is unusable, so every sim runs twice and is compared exactly. Byte-identical
+in A1, with a 1e-9 px nudge to one starting position as the broken control.
+Extended twice: A5 took it to the rendered PIXELS (two GIFs of one bake hash the
+same; moving a single vertex 0.05 px changes the digest) and B1 took it to
+DOCUMENTS (two loads of one scene file bake to the same bytes, so nothing depends
+on dict order or float text).
 
 **I. Keyframe volume (AE phase).** **CLOSED IN B2, and it is not where this
 entry assumed.** Measured on AE 26.3x87 over 6,486 keyframes:
