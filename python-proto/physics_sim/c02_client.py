@@ -35,13 +35,15 @@ counts UTF-16 code units and the bridge counts bytes, so the two agree only for
 ASCII -- the bridge reports whether the payload was ASCII, and a mismatch on a
 non-ASCII payload is arithmetic, not corruption.
 
-WHAT IT DOES NOT MEASURE
-------------------------
-The pipe. The payload is generated or read INSIDE the bridge, so the number
-below is AEGP_ExecuteScript's ceiling and nothing else. Getting a 145 KB bake
-from the shell to the bridge is a separate limit -- PHYSBRIDGE_LINE_MAX is
-currently 64 KB -- and it is one line to raise, or moot if the shell passes a
-path.
+THE PIPE IS MEASURED SEPARATELY, AND ON PURPOSE
+-----------------------------------------------
+`sweep`, `echo` and `payload` all generate or read their payload INSIDE the
+bridge, so what they produce is AEGP_ExecuteScript's ceiling and nothing else.
+Getting a 145 KB bake from the shell INTO the bridge is a different limit, and
+`pipe` is the one that measures it: there the payload travels in the request
+line itself, and the bridge reports what arrived without touching an AEGP
+suite. Keeping them apart is the point -- one number covering both would
+describe neither.
 """
 
 from __future__ import annotations
@@ -288,6 +290,82 @@ def cmd_echo(args):
     return 0
 
 
+def cmd_pipe(args):
+    """The half C0.2 explicitly did not measure: the request direction.
+
+    Every other probe generates or reads its payload INSIDE the bridge, so it
+    measures AEGP_ExecuteScript and nothing else. Here the payload travels in
+    the request line itself, which is what a shell handing over a bake would
+    actually do, and the bridge reports what arrived without touching an AEGP
+    suite. What is under test is the transport and the request reader.
+
+    The payload is JSON-escaped into the request by json.dumps, so it exercises
+    the escaping too -- with --real, on a bake full of the quotes and
+    backslashes that make escaping worth testing at all.
+    """
+    if args.real:
+        src = open(args.real, encoding="utf-8").read()
+        print(f"\n   pipe, request direction -- {os.path.basename(args.real)}, "
+              f"{len(src):,} chars\n")
+        sizes = [len(src)]
+    else:
+        print("\n   pipe, request direction -- doubling until the bridge "
+              "refuses\n")
+        sizes = []
+        n = args.start
+        while n <= args.limit:
+            sizes.append(n)
+            n *= 2
+
+    alphabet = ("0123456789abcdefghijklmnopqrstuvwxyz"
+                "ABCDEFGHIJKLMNOPQRSTUVWXYZ.,:;-_/")
+
+    for n in sizes:
+        payload = src if args.real else "".join(
+            alphabet[i % len(alphabet)] for i in range(n))
+
+        t0 = time.time()
+        try:
+            reply = request({"cmd": "pipe_probe", "data": payload})
+        except TimeoutError as e:
+            print(f"   {n:>10,}  FAILED: {e}")
+            return 1
+        ms = (time.time() - t0) * 1000
+
+        if reply.startswith('{"ok":false'):
+            print(f"   {n:>10,}  REFUSED: {json.loads(reply)['error']}")
+            return 1
+
+        r = json.loads(reply)
+        want = checksum(payload)
+        head = "".join("%04x" % ord(c) for c in payload[:16])
+        tail = "".join("%04x" % ord(c) for c in payload[-16:])
+
+        if r["bytes_received"] != len(payload):
+            why = (f"TRUNCATED  {r['bytes_received']:,} of {len(payload):,} "
+                   f"arrived")
+        elif r["sum"] != want:
+            why = "CORRUPT  checksums disagree" + (
+                "" if r["head"] == head else " (the front differs)") + (
+                "" if r["tail"] == tail else " (the end differs)")
+        else:
+            why = "intact"
+
+        # The request line is bigger than the payload: JSON escaping, plus the
+        # envelope. On a real bake that gap is the escaping, and it is the
+        # thing a size limit would actually be measured against.
+        line = len(json.dumps({"cmd": "pipe_probe", "data": payload})) + 1
+        print(f"   {len(payload):>10,} B payload   {line:>10,} B line   "
+              f"{ms:>6.0f} ms   {why}")
+
+        if why != "intact":
+            return 1
+
+    print(f"\n   no ceiling in the request direction below "
+          f"{sizes[-1]:,} bytes.")
+    return 0
+
+
 def cmd_payload(args):
     """The real bake, down both roads, so the comparison is like for like."""
     path = os.path.abspath(args.path)
@@ -332,6 +410,14 @@ if __name__ == "__main__":
     p.add_argument("--start", type=int, default=1 << 14)
     p.add_argument("--limit", type=int, default=1 << 25)
     p.set_defaults(fn=cmd_echo)
+
+    p = sub.add_parser("pipe", help="the request direction, over the pipe")
+    p.add_argument("--start", type=int, default=1 << 14)
+    p.add_argument("--limit", type=int, default=1 << 25)
+    p.add_argument("--real", nargs="?", const=DEFAULT_PAYLOAD, default=None,
+                   help="send a real file instead of the sweep, so the JSON "
+                        "escaping is exercised on quotes and backslashes")
+    p.set_defaults(fn=cmd_pipe)
 
     p = sub.add_parser("payload", help="the real bake, both roads")
     p.add_argument("path", nargs="?", default=DEFAULT_PAYLOAD)
