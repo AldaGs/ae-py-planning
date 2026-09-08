@@ -70,9 +70,11 @@ tweens. 116 checks across eight steps, all green.
 
 ### ▶ Next: C0 — the spikes
 
-Throwaway, pass/fail on a measurement, same gate as pieFX's Phase 0. **They
-happen in the AE SDK tree, not this repo**, and `AldaGs/pieFX` already has the
-AEGP scaffolding, script execution and the socket.
+Throwaway, pass/fail on a measurement, same gate as pieFX's Phase 0. **The
+native side lives in its own repo, `AldaGs/ae_physics_simulator`** (cloned into
+the SDK tree at `Examples/Template/PhysBridge`, where its include paths
+resolve). `AldaGs/pieFX` supplied the AEGP scaffolding, script execution and the
+pipe transport.
 
 - [ ] **C0.1 — the bridge.** AEGP opens a local socket, receives
       `{"cmd":"read_scene"}`, runs `b1_read_shapes.jsx` through
@@ -81,6 +83,9 @@ AEGP scaffolding, script execution and the socket.
       **This is the gate — the architecture does not stand without it.**
       Watch: `AEGP_ExecuteScript` returns a non-NULL but *empty* error handle on
       success; model AEGP code on Persisto, never Commando.
+      *Built, exports a bare `EntryPointFunc`, client written — awaiting a run
+      in AE.* Plug-in in `ae_physics_simulator`, client at
+      `python-proto/physics_sim/c01_client.py`.
 - [ ] **C0.2 — payload size.** Does `AEGP_ExecuteScript` take a 148 KB bake as a
       string, or is a temp file needed? Measure *where it breaks*, not just
       whether it works. Shapes the protocol either way.
