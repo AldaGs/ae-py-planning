@@ -57,22 +57,64 @@ ES_BULK_WRITE = 19.6
 ES_INTERP = 853.0
 
 
-def bench(n: int, timeout=600.0) -> dict:
-    reply = request({"cmd": "bench_keys", "bytes": str(n)}, timeout=timeout)
+def bench(n: int, mode: str = "full", timeout=900.0) -> dict:
+    reply = request({"cmd": "bench_keys", "bytes": str(n), "mode": mode},
+                    timeout=timeout)
     if reply.startswith('{"ok":false'):
         raise SystemExit("bridge error: " + json.loads(reply)["error"])
     return json.loads(reply)
 
 
-def show(r: dict) -> None:
-    add, interp, tan = (r["add_us_per_key"], r["interp_us_per_key"],
-                        r["tangent_us_per_key"])
+def integrity(r: dict) -> tuple[bool, str]:
+    """Did the pass actually make the path straight?
 
-    # The comparison that matters is interpolation against 853; the add is
-    # shown against the bulk write because that is the path B2 actually uses.
+    Three things have to hold, and the last is the one A5 spent a phase
+    learning to check: a cleared auto-bezier flag with a non-zero tangent
+    still bows the path between keyframes, where every stored value looks
+    perfect.
+
+    The SAMPLED counts decide this, not `interp_readback`. That field reports
+    one named key, and the sampler steps past it unless the stride happens to
+    land there -- it read 0, meaning "never sampled", on a run where all 66
+    sampled keys were clean, and 0 is indistinguishable from a total failure.
+    It stays in the reply for the record and is deliberately not judged here.
+    """
+    n = r.get("keys_checked", 0)
+
+    if not n:
+        return False, "nothing was checked"
+    if r.get("bad_interp") or r.get("bad_flag"):
+        return False, (f"of {n} keys, {r.get('bad_interp', 0)} are not LINEAR "
+                       f"and {r.get('bad_flag', 0)} are still auto-bezier")
+    if r["tangent_magnitude"] > 1e-9:
+        return False, (f"worst tangent over {n} keys is "
+                       f"{r['tangent_magnitude']:.4f}, not zero")
+    return True, f"straight ({n} keys)"
+
+
+def linear_pass(r: dict) -> float:
+    """The native equivalent of B2's makeLinear(), which is what 853 measures.
+
+    makeLinear() makes THREE calls per Position key -- set the interpolation
+    type, clear spatial auto-bezier, zero the spatial tangents -- and its
+    timer covers all three. Comparing one native phase against that number
+    would put a third of the work up against all of it, and would have
+    reported native as ~49x faster when it is not.
+    """
+    bez = r["bezier_us_per_key"] if r.get("bezier_ran") else 0.0
+    return r["interp_us_per_key"] + bez + r["tangent_us_per_key"]
+
+
+def show(r: dict) -> None:
+    ok, why = integrity(r)
+    bez = (f"{r['bezier_us_per_key']:>7.1f}" if r.get("bezier_ran")
+           else "      -")
     print(f"   {r['stored']:>7,} keys   "
-          f"add {add:>8.1f}   interp {interp:>8.1f}   tangents {tan:>8.1f} "
-          f"us/key")
+          f"add {r['add_us_per_key']:>6.1f}   "
+          f"interp {r['interp_us_per_key']:>6.1f}   "
+          f"bezier {bez}   "
+          f"tangents {r['tangent_us_per_key']:>6.1f}   "
+          f"= {linear_pass(r):>7.1f} us/key   {why}")
 
     if r["stored"] != r["asked"]:
         print(f"      ! only {r['stored']:,} of {r['asked']:,} keys were "
@@ -81,43 +123,53 @@ def show(r: dict) -> None:
 
 def cmd_bench(args):
     sizes = [args.keys] if args.keys else [1000, 3000, 6486, 12000]
+    modes = [args.mode] if args.mode else ["full", "nobezier"]
 
     print("\n   native keyframes, via AEGP_KeyframeSuite")
     print(f"   ExtendScript baseline: bulk write {ES_BULK_WRITE} us/key, "
-          f"interpolation {ES_INTERP} us/key\n")
+          f"the LINEAR pass {ES_INTERP} us/key")
 
     last = None
-    for n in sizes:
-        t0 = time.time()
-        r = bench(n)
-        show(r)
-        last = r
-        # A slow phase is the finding, not a reason to stop, but a run that
-        # takes minutes per size deserves to say so.
-        if time.time() - t0 > 60:
-            print(f"      ({time.time() - t0:.0f}s for that one)")
+    for mode in modes:
+        label = ("all three calls, as B2 does it" if mode == "full"
+                 else "without the auto-bezier call")
+        print(f"\n   mode={mode}  ({label})\n")
+        for n in sizes:
+            t0 = time.time()
+            r = bench(n, mode)
+            show(r)
+            if mode == "nobezier":
+                last = r
+            elif last is None:
+                last = r
+            if time.time() - t0 > 60:
+                print(f"      ({time.time() - t0:.0f}s for that one)")
 
     if last is None:
         return 1
 
-    print(f"\n   dimensionality {last['dim']}, interpolation read back as "
-          f"{last['interp_readback']} "
-          f"({'LINEAR' if last['interp_readback'] == 1 else 'NOT LINEAR'})")
+    ok, why = integrity(last)
+    print(f"\n   dimensionality {last['dim']}; final state: {why}")
+    if not ok:
+        print("   the pass did not take -- the timings above mean nothing")
+        return 1
 
-    i = last["interp_us_per_key"]
-    print(f"\n   interpolation: {i:.1f} us/key native vs {ES_INTERP} "
-          f"ExtendScript  --  {ES_INTERP / i:.0f}x faster"
-          if i > 0 else "")
+    p = linear_pass(last)
+    print(f"\n   the LINEAR pass, all three calls: {p:.1f} us/key native "
+          f"vs {ES_INTERP} ExtendScript  --  {ES_INTERP / p:.0f}x faster")
 
-    per_12k = i * 12000 / 1e6
-    print(f"   12,000 keys would cost {per_12k:.1f} s of interpolation "
+    print(f"   12,000 keys: {p * 12000 / 1e6:.1f} s "
           f"(ExtendScript: {ES_INTERP * 12000 / 1e6:.0f} s)")
 
     # Fracture is the case that made this a requirement rather than a
-    # nice-to-have: fifty shards is where 853 us/key became ~25 s.
-    fifty = i * 50 * 300 / 1e6
+    # nice-to-have: fifty shards is where the pass became tens of seconds.
+    fifty = p * 50 * 300 / 1e6
     print(f"   fifty shards x 300 frames: {fifty:.1f} s "
           f"(ExtendScript: {ES_INTERP * 50 * 300 / 1e6:.0f} s)")
+
+    total = last["add_us_per_key"] + p
+    print(f"\n   whole apply, add + pass: {total:.1f} us/key, so 12,000 keys "
+          f"is {total * 12000 / 1e6:.1f} s")
     return 0
 
 
@@ -130,6 +182,10 @@ if __name__ == "__main__":
     p = sub.add_parser("bench", help="time native keyframe writing")
     p.add_argument("--keys", type=int, default=None,
                    help="one key count instead of the sweep")
+    p.add_argument("--mode", choices=("full", "nobezier"), default=None,
+                   help="'full' does all three calls B2 does; 'nobezier' "
+                        "omits the auto-bezier one, to find out whether "
+                        "setting tangents already clears the flag")
     p.set_defaults(fn=cmd_bench)
 
     args = ap.parse_args()
