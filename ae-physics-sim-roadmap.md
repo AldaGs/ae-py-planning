@@ -68,7 +68,7 @@ tweens. 116 checks across eight steps, all green.
 
 ## Critical path
 
-### ▶ Next: C0 — the spikes
+### C0 — the spikes
 
 Throwaway, pass/fail on a measurement, same gate as pieFX's Phase 0. **The
 native side lives in its own repo, `AldaGs/ae_physics_simulator`** (cloned into
@@ -76,19 +76,19 @@ the SDK tree at `Examples/Template/PhysBridge`, where its include paths
 resolve). `AldaGs/pieFX` supplied the AEGP scaffolding, script execution and the
 pipe transport.
 
-- [ ] **C0.1 — the bridge.** AEGP opens a local socket, receives
-      `{"cmd":"read_scene"}`, runs `b1_read_shapes.jsx` through
-      `AEGP_ExecuteScript`, returns the scene JSON down the socket.
-      *Pass:* byte-identical to what the save dialog writes today.
-      **This is the gate — the architecture does not stand without it.**
-      Watch: `AEGP_ExecuteScript` returns a non-NULL but *empty* error handle on
-      success; model AEGP code on Persisto, never Commando.
-      *Built, exports a bare `EntryPointFunc`, client written — awaiting a run
-      in AE.* Plug-in in `ae_physics_simulator`, client at
-      `python-proto/physics_sim/c01_client.py`.
-- [ ] **C0.2 — payload size.** Does `AEGP_ExecuteScript` take a 148 KB bake as a
-      string, or is a temp file needed? Measure *where it breaks*, not just
-      whether it works. Shapes the protocol either way.
+- [x] **C0.1 — the bridge. PASSES** (2026-09-07, AE 26.3x87). The AEGP ran
+      `b1_read_shapes.jsx` through `AEGP_ExecuteScript` and returned a scene
+      document **byte-identical** to the save dialog's: 2,185 bytes, sha256
+      `b589df0b0325b543` on both sides, **16 ms** for the whole round trip.
+      **The gate is green — Phase C's architecture stands**, and B1/B2's
+      ExtendScript is *reused* rather than rebuilt as `evalScript` calls.
+      Evidence in `ae_physics_simulator/SPIKES.md`.
+- [ ] **C0.2 — payload size.** ▶ **next.** Does `AEGP_ExecuteScript` take a
+      148 KB bake as a string, or is a temp file needed? Measure *where it
+      breaks*, not just whether it works. Shapes the protocol either way.
+      C0.1 dented it and no more: it moved **15.9 KB in** (the script) and
+      **2.2 KB out** (the scene), which proves neither direction has a small
+      hard ceiling and says nothing about 148 KB.
 - [ ] **C0.3 — keyframes from native code.** Can `AEGP_KeyframeSuite` beat
       ExtendScript's 853 µs/key interpolation cost? Wall I's only remaining
       lever. Was an optimisation; **fracture makes it a requirement** — fifty

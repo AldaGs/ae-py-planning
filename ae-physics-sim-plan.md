@@ -422,7 +422,10 @@ on principle. The cost is a PyInstaller bundle, which is a real wart for a
 Same gate as pieFX's Phase 0: throwaway spikes that answer the questions the
 whole design rests on. Each is pass/fail on a measurement.
 
-- **C0.1 — the bridge.** An AEGP opens a local socket, receives
+- **C0.1 — the bridge. PASSED 2026-09-07** on AE 26.3x87: 2,185 bytes returned,
+  byte-identical to the save dialog (sha256 `b589df0b0325b543`), 16 ms round
+  trip. The gate is green and the architecture stands. Evidence in
+  `AldaGs/ae_physics_simulator`, `SPIKES.md`. As specified it was: an AEGP opens a local socket, receives
   `{"cmd":"read_scene"}`, runs B1's reader through `AEGP_ExecuteScript`, and
   returns the scene JSON down the socket instead of through a save dialog.
   *Pass:* the JSON that arrives over the socket is byte-identical to what the
