@@ -305,10 +305,26 @@ function layerJson(L) {
 // Main
 // -------------------------------------------------------------------------
 
+/* Two ways to run this file, and they must produce the same bytes.
+ *
+ *   from File > Scripts   a save dialog, then an alert. Unchanged.
+ *   from the C0.1 bridge  the caller prepends `var PHYS_RETURN_JSON = true;`
+ *                         and the script RETURNS the JSON string instead.
+ *
+ * The second mode must never open a modal: an alert raised by a script the
+ * AEGP started from its idle hook would block AE waiting for a click nobody is
+ * there to give. So every user-facing message below is guarded, and in bridge
+ * mode the failure comes back as a string the caller can read. */
+var BRIDGE = (typeof PHYS_RETURN_JSON !== "undefined") && PHYS_RETURN_JSON;
+
+function fail(msgZ) {
+    if (!BRIDGE) alert(msgZ);
+    return "ERROR: " + msgZ;
+}
+
 var comp = app.project.activeItem;
 if (!(comp instanceof CompItem)) {
-    alert("Select a composition first (click it in the Project panel).");
-    return;
+    return fail("Select a composition first (click it in the Project panel).");
 }
 
 var layers = [];
@@ -318,9 +334,8 @@ for (var i = 1; i <= comp.numLayers; i++) {
 }
 
 if (layers.length === 0) {
-    alert("No usable shape layers found in '" + comp.name + "'.\n\n" +
-          WARNINGS.join("\n\n"));
-    return;
+    return fail("No usable shape layers found in '" + comp.name + "'.\n\n" +
+                WARNINGS.join("\n\n"));
 }
 
 var durationFrames = Math.round(comp.duration * comp.frameRate);
@@ -356,12 +371,21 @@ var ws = [];
 for (i = 0; i < WARNINGS.length; i++) ws.push(str(WARNINGS[i]));
 chunks.push(",\"warnings\":[" + ws.join(",") + "]}");
 
+var json = chunks.join("");
+
+/* The bridge's whole pass criterion is that these two paths emit the SAME
+ * bytes, so the string is built once, above, and only its destination differs
+ * below. Nothing is formatted twice. */
+if (BRIDGE) {
+    return json;
+}
+
 var f = File.saveDialog("Save scene JSON", "*.json");
 if (f === null) return;
 if (f.name.indexOf(".json") === -1) f = new File(f.fsName + ".json");
 f.encoding = "UTF-8";
 f.open("w");
-f.write(chunks.join(""));
+f.write(json);
 f.close();
 
 alert("Wrote " + layers.length + " layer(s) to\n" + f.fsName +
