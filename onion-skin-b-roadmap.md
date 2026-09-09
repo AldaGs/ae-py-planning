@@ -61,7 +61,17 @@ Same discipline as Option A's Phase 0: **throwaway spikes, hardcoded inputs, log
 output, no onion-skin logic.** Measurements with a broken control, never
 assertions.
 
-### B1 — Binary: one `.aex` or two?
+### B1 — Binary: one `.aex` or two? — **ANSWERED: TWO, 2026-09-09**
+
+> A single `.aex` declaring both PiPLs (16000 effect, 16001 AEGP) built fine —
+> both entry points exported, both resources emitted — but AE loaded only the
+> effect and never called `EntryPointFunc`. **One `.aex` is claimed by one kind.**
+>
+> The mechanism is deliberately not pinned down: "first PiPL wins" and "a file
+> already claimed as an effect is skipped by the AEGP scan" predict the same
+> observable, and the remedy is identical. Shipping as `osB3fx.aex` +
+> `osB3panel.aex`, which find each other by match name — how Phase 2 was always
+> going to work, so the split costs nothing architecturally.
 
 Build a stub that declares both an effect and an AEGP entry point in its PiPL.
 Load it in AE.
@@ -160,7 +170,7 @@ If B4's number comes back ugly, B5 plus a minimal panel is the shipped product.
 
 | Spike | Question | Pass condition | Blocking? |
 |---|---|---|---|
-| B1 | one binary or two? | either answer passes | no — informational |
+| B1 | one binary or two? | either answer passes | no — **ANSWERED: two** |
 | B2 | panel exists and persists? | docks, survives restart, responds with no selection | **yes — PASSED run 1** |
 | B3 | panel writes params, AE re-renders, selection intact? | repaint + selection unchanged + single-step undo | **yes** |
 | B5 | shortcut-assignable commands? | toggle fires with no selection | no — **PASSED run 1**, no-selection row still open |
