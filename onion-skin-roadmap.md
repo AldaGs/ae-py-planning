@@ -180,16 +180,26 @@ corner case; it is the main case.
 
 **The ladder, cheapest first.**
 
-1. **Sample several rows and columns**, not one of each, and take the first
-   consistent answer. The pixels are already captured; the scan is O(w+h) per
-   line. Kills the missed-line cause outright.
-2. **One edge instead of two.** The scan currently needs both comp edges on an
-   axis. With `s` read independently (`views[i].options.zoom`, A3b: 0.19 ms, live
-   in motion), one visible edge gives `t` — `tx = x_left` or
-   `tx = x_right − s·comp_w`.
-3. **The residual**: comp covering the panel, no edge anywhere. Either
+1. **One AXIS instead of both** — stage 1a, and this is the correction that
+   matters. Run 1 rejected the whole frame if either axis failed, but at 69% zoom
+   the comp's left and right edges sat at x=493 and x=1818, both inside the
+   panel: the horizontal axis was perfectly measurable and was thrown away
+   because the vertical was not. That one policy accounts for the longest blind
+   run in the session. (An earlier draft of this section said "one edge instead
+   of two". That is stage 3 territory; the cheap win is per-axis.)
+2. **Sample several rows and columns**, not one of each — stage 1b. The pixels
+   are already captured and each scan is O(w+h), so ten lines cost what two did.
+   Kills the missed-line cause outright.
+3. **The residual**: comp covering the panel on *both* axes with no edge
+   anywhere — roughly ≥ 83% zoom for a 1080p comp in that panel. Either
    frame-to-frame correlation of the captured panel (anchor + delta, integrating
    *pixels* — so unlike A3c it cannot miss a gesture), or degrade honestly.
+   **Deliberately not built**: ship honest degradation and let usage decide.
+
+**Stages 1 and 2 are built and self-tested offline (2026-09-09);** the detector's
+new within-axis vote is proven against synthetic panels including three broken
+controls, and the cross-axis zoom check is *kept* for when both axes are present,
+so the fix added a control rather than trading one away.
 
 **Regardless of the ladder: blind must be visible as blind.** The probe held its
 last good `t` and kept drawing a confident box. That is the roadmap's founding
