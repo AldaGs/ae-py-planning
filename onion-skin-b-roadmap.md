@@ -76,7 +76,19 @@ Load it in AE.
 **Failure is cheap and expected-survivable:** ship two binaries, panel finds the
 effect by match name. Record the answer; do not spend a second day on it.
 
-### B2 — Panel: does a dockable panel exist and survive?
+### B2 — Panel: does a dockable panel exist and survive? — **PASS, run 1, 2026-09-09**
+
+> Docks beside Effect Controls, survives a workspace switch and a full AE
+> restart (AE recreates it from the saved workspace with no menu command), and
+> clicks reach us with a single layer selected, a *different* layer selected, and
+> **nothing selected**. That last row is the gate, and it holds. Full scoring in
+> `OnionSkin/B2/B2_RESULT.md`; log at `_spikes/B2_run1.txt`.
+>
+> One runbook defect recorded there: it told the operator to read session
+> boundaries off a `GetTickCount` reset, which cannot happen — that clock counts
+> from system boot. A check that can only fail is as useless as one that can only
+> pass.
+
 
 Register one panel via `AEGP_PanelSuite`. Draw a single hardcoded rectangle and
 one working button that writes to the log.
@@ -137,7 +149,7 @@ If B4's number comes back ugly, B5 plus a minimal panel is the shipped product.
 | Spike | Question | Pass condition | Blocking? |
 |---|---|---|---|
 | B1 | one binary or two? | either answer passes | no — informational |
-| B2 | panel exists and persists? | docks, survives restart, responds with no selection | **yes** |
+| B2 | panel exists and persists? | docks, survives restart, responds with no selection | **yes — PASSED run 1** |
 | B3 | panel writes params, AE re-renders, selection intact? | repaint + selection unchanged + single-step undo | **yes** |
 | B5 | shortcut-assignable commands? | toggle fires with no selection | no — but changes scope |
 | B4 | what does a widget cost? | no pass/fail; produces a number | no — sets budget |
@@ -166,6 +178,26 @@ rules. The effect is a place where nothing can be measured.
   the top, and removes it cleanly. The user experiences a toggle.
 - Panel drives the params from B3's mechanism. Scope set by B4's number.
 - Layer is found by match name, not by index or by a stored ID — layers move.
+
+## Closed question: controls *inside* the comp viewer
+
+Asked 2026-09-09, after B2 passed. **Answer: not as always-on controls, and the
+docked panel stands.** Recorded here so it is not re-opened.
+
+- **Custom Comp UI** draws and clicks inside the viewer (Corner Pin's handles do
+  exactly this) but AE delivers those events only while the effect is selected in
+  Effect Controls — controls that appear only when the layer is selected do not
+  remove the friction they exist to remove.
+- **A topmost overlay over the viewer** (the pieFX mechanism) is refused for a
+  *different* reason than Option A's, and the distinction matters: a button bar
+  anchored to a panel corner needs the panel's screen rect, not the comp's pan,
+  so A's geometric ceiling does not apply. It is refused because it still rests
+  on **A2, never solved — nothing in AE can name its panels.** A3c's workaround
+  was a five-second hover to point at the viewer. That is not a way to reach an
+  on/off button.
+
+The real answer for in-viewer *reach* is **B5**: an animator with a hand on the
+pen wants a key, not a button to travel to.
 
 ## Phase 3 — on-canvas gizmos (optional, and only here)
 
