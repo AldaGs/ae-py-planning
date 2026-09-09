@@ -37,6 +37,11 @@ files get.
 AE holds what the solver computed to **0.0000 px / 0.0000°**, with straight-line
 tweens. 116 checks across eight steps, all green.
 
+**C0 is complete too — all three spikes pass** (2026-09-07/08). The architecture
+gate is green, the protocol choice turned out to be free, and Wall I's cost is
+gone. **C1 is next.** Evidence in `ae_physics_simulator/SPIKES.md`, which also
+records what each result does *not* cover.
+
 | Step | What it settled | Checks |
 |---|---|---|
 | A1 | world, bake spine, y-down convention, ppm band | 13 |
@@ -60,7 +65,7 @@ tweens. 116 checks across eight steps, all green.
 | F | rotation unwrapping | closed in A1; A5 found it is invisible on stills |
 | G | timestep vs frame rate | closed in A1 |
 | H | determinism | closed in A1, extended to pixels (A5) and documents (B1) |
-| I | keyframe volume | closed in B2 — and not where it was assumed |
+| I | keyframe volume | closed in B2 — and not where it was assumed; **C0.3 then removed the cost**, 88.5 µs/key native vs 853 |
 | J | one layer is one transform | recorded; weld-and-warn, split deferred to C5 |
 | K | a hand-carried loop goes stale | found and guarded in B3 |
 
@@ -83,21 +88,40 @@ pipe transport.
       **The gate is green — Phase C's architecture stands**, and B1/B2's
       ExtendScript is *reused* rather than rebuilt as `evalScript` calls.
       Evidence in `ae_physics_simulator/SPIKES.md`.
-- [ ] **C0.2 — payload size.** ▶ **next.** Does `AEGP_ExecuteScript` take a
-      148 KB bake as a string, or is a temp file needed? Measure *where it
-      breaks*, not just whether it works. Shapes the protocol either way.
-      C0.1 dented it and no more: it moved **15.9 KB in** (the script) and
-      **2.2 KB out** (the scene), which proves neither direction has a small
-      hard ceiling and says nothing about 148 KB.
-- [ ] **C0.3 — keyframes from native code.** Can `AEGP_KeyframeSuite` beat
-      ExtendScript's 853 µs/key interpolation cost? Wall I's only remaining
-      lever. Was an optimisation; **fracture makes it a requirement** — fifty
-      shards is ~25 s of interpolation alone.
+- [x] **C0.2 — payload size. PASSES** (2026-09-08). **There is no ceiling
+      anywhere near the bake.** Both roads — escaped into the script text, or a
+      temp file the script opens — carry the real 145,090-byte `b2_bake.json`
+      intact, and neither breaks below **32 MB**, 231× the bake, in either
+      direction. They cost the same, to within the clock's resolution.
+      The pipe was measured separately and is not a constraint either: 32 MB
+      inline at ~79 MB/s, the bake in ~15 ms.
+      **So the protocol choice is free**, and the recommendation is the *file*
+      road on structural grounds — B2 already reads a file, the request stays
+      tiny, and escaping a payload into source that is then executed is a
+      second place to get it wrong. What actually costs is ExtendScript
+      touching characters: `eval` of the bake is ~22 ms and the transfer is
+      under one clock tick.
+- [x] **C0.3 — keyframes from native code. PASSES** (2026-09-08). Yes, and
+      the 853 µs/key was **the ExtendScript bridge**, not AE. The LINEAR pass
+      costs **88.5 µs/key** natively — about **10×** — flat from 1,000 to
+      6,486 keys, and 6,486 is B2's own count so that is a comparison rather
+      than an extrapolation. **Fracture is affordable**: fifty shards × 300
+      frames projects to **1.3 s** against 13 s.
+      Three caveats live with the number. `AEGP_SetKeyframeFlag` is **O(n²)**
+      — called per key as B2 does it, native is *worse* at scale — but dropping
+      it leaves the path straight anyway. Native's batch add is *slower* than
+      `setValuesAtTimes` (29 vs 19.6 µs/key), so the whole win is the
+      interpolation pass: **7.4×** across a complete apply, not 10×. And the
+      853 baseline is a Position/Rotation blend, so the comparison is generous
+      to ExtendScript.
+      One thing is assumed rather than measured: *why* dropping the auto-bezier
+      call works. Reading the flag before the tangent phase would settle it.
+      **This unblocks pre-fracture's Tier 2 gate.**
 
 ### Then C1–C5 — the application
 
-- [ ] **C1.** Tauri shell: window, scene list, B3's parameters as real controls,
-      settings persisted. **Owes `ae-physics-scene/2` + `ae-physics-bake/3`
+- [ ] **C1.** ▶ **next.** Tauri shell: window, scene list, B3's parameters as
+      real controls, settings persisted. **Owes `ae-physics-scene/2` + `ae-physics-bake/3`
       carrying every Tier 0 slot** (below), even where the arrays stay empty.
 - [ ] **C2.** The viewport: `preview.py`'s renderer becomes the canvas, scrubbing
       the bake before it is applied. A5's argument becomes the main surface.
@@ -146,7 +170,7 @@ ever written.
 ### Tier 2 — better rather than equal
 
 - [ ] alpha bodies for any layer type (gated on Phase D)
-- [ ] pre-fracture (gated on C5, and on C0.3 for the keyframe cost)
+- [ ] pre-fracture (gated on C5; the **C0.3 keyframe-cost gate is now open** — fifty shards is ~1.3 s, not ~25 s)
 - [ ] squash & stretch (cheap *once* the bake carries contacts + velocity)
 
 ### Non-goals, chosen deliberately
