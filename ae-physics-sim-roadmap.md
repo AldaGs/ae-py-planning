@@ -42,10 +42,16 @@ gate is green, the protocol choice turned out to be free, and Wall I's cost is
 gone. Evidence in `ae_physics_simulator/SPIKES.md`, which also records what each
 result does *not* cover.
 
-**C1 has started. C1.0 — the schema — is done** (2026-09-09):
+**C1 has started.** **C1.0 — the schema — is done** (2026-09-09):
 `ae-physics-scene/2` and `ae-physics-bake/3` carry all seven Tier 0 slots,
-21/21 checks in `c1_schema.py`. The shell is next, and it now has a settled
-document to build against.
+21/21 checks in `c1_schema.py`. **C1.1 — the shell — is built** the same day:
+a Tauri window in `ae_physics_simulator/app` that pings the bridge, reads the
+comp, lists the layers, and runs B3 as a subprocess.
+
+**Both owe the same sitting**, and it is the next thing to do: open a comp with
+shape layers in AE and read it through the shell. No comp has yet produced a
+`/2` document — every one in existence came from the upgrade path — and the
+scene list has never rendered a real comp.
 
 | Step | What it settled | Checks |
 |---|---|---|
@@ -143,8 +149,39 @@ pipe transport.
         **Still owed: a run in AE.** No comp has yet produced a /2 document —
         every /2 in existence came from the upgrade path. `b1_read_shapes.jsx`
         emits /2 and passes `jsx_check.py`, which is not the same as having run.
-  - [ ] **C1.1 — the shell.** Tauri window, scene list, B3's parameter set as
-        real controls, settings persisted.
+  - [x] **C1.1 — the shell. BUILT** (2026-09-09), in
+        `ae_physics_simulator/app` — one clone gets both halves of the product,
+        and nothing in the MSBuild solution knows `app/` exists. Tauri 2 +
+        vanilla TS; the solver is `b3_loop.py` in a subprocess against the
+        existing checkout, so PyInstaller stays a packaging step rather than a
+        prerequisite for seeing a window.
+        Bridge light, read comp, scene list with click-to-pin, B3's parameters
+        as controls at B3's defaults, simulate, settings saved on every change.
+        **Every control is an argument to `b3_loop.py` and nothing else** —
+        `b3_checks.py` already runs that command in a subprocess rather than
+        calling `run()` in-process, and a GUI that reimplemented the loop would
+        be a second implementation with its own bugs.
+        It deliberately does **not** know the schema (the scene is parsed
+        shallowly in the front end, because a third implementation after
+        `scene_io.py` and the jsx is a third place to drift) and does **not**
+        apply the bake.
+        **It found a real defect in the transport.** The pipe server holds one
+        instance of each pipe and re-creates them between clients; a connection
+        landing in that window is read, answered, and the answer written to
+        nobody (`write: no client connected, 23 bytes dropped` — exactly
+        `{"ok":true,"pong":true}`). `c01_client.py` never hit it because a
+        person runs it once; an application pings on launch and then reads,
+        back to back. The exchange is retried on a close-without-answer and
+        only then. Four live pings: 3312 ms, then 31, 78, 27.
+        **Still owed: the scene list has never rendered a real comp.** The
+        machine's active comp during verification had no shape layers, so what
+        was exercised end-to-end is the bridge, the reader running inside AE,
+        and the refusal path — not the layer list, the pinning, or a simulate
+        run. That and C1.0's `/2`-from-AE gate are the same sitting: open a
+        comp with shape layers and read it.
+  - [ ] **C1.2 — the sitting that closes both gates.** Read a real comp through
+        the shell: first `/2` document ever produced by AE, first layer list,
+        first simulate from the window.
 - [ ] **C2.** The viewport: `preview.py`'s renderer becomes the canvas, scrubbing
       the bake before it is applied. A5's argument becomes the main surface.
 - [ ] **C3.** Staleness (Wall K) survives the GUI — re-read and compare, never
