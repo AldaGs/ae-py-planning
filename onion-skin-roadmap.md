@@ -1,5 +1,8 @@
 # Onion Skin — Option A (viewport overlay) roadmap
 
+> **The live roadmap is now `onion-skin-b-roadmap.md`.** This file is the record
+> of a closed line of work, kept for its findings.
+
 > ## CLOSED 2026-09-09 — Option A is dead, and the gate is why it cost only Phase 0
 >
 > Called after A3f run 1 in AE: the errors seen in normal use would cost the
