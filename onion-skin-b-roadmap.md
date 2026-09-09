@@ -131,7 +131,19 @@ is available.
   that number is the panel's Phase 2 budget, and if the number is ugly the
   answer is not to cut the panel but to cut its ambition (see B5).
 
-### B5 — The cheap escape: commands and shortcuts
+### B5 — The cheap escape: commands and shortcuts — **PASS, run 1, 2026-09-09**
+
+> Three commands in the Animation menu, bound to keys, driving state that the
+> panel paints. The keys work. Corroborated beyond the operator's report: the log
+> holds bursts of six commands inside one second, a rate no menu-driven run could
+> produce.
+>
+> **One row not evidenced:** all 62 lines read `selection=one layer, index 4`, so
+> the no-selection step was never performed. Probably passes — the commands are
+> enabled unconditionally — but reach-regardless-of-selection is Option B's
+> central claim and is not something to infer. Open, and cheap. Details in
+> `OnionSkin/B5/B5_RESULT.md`.
+
 
 `AEGP_RegisterCommand` + a menu item. Register "Onion Skin: Toggle" and
 "Onion Skin: More / Fewer Previous".
@@ -151,7 +163,7 @@ If B4's number comes back ugly, B5 plus a minimal panel is the shipped product.
 | B1 | one binary or two? | either answer passes | no — informational |
 | B2 | panel exists and persists? | docks, survives restart, responds with no selection | **yes — PASSED run 1** |
 | B3 | panel writes params, AE re-renders, selection intact? | repaint + selection unchanged + single-step undo | **yes** |
-| B5 | shortcut-assignable commands? | toggle fires with no selection | no — but changes scope |
+| B5 | shortcut-assignable commands? | toggle fires with no selection | no — **PASSED run 1**, no-selection row still open |
 | B4 | what does a widget cost? | no pass/fail; produces a number | no — sets budget |
 
 **Gate rule.** B2 and B3 are the gate. If either fails, the panel is dead and the
