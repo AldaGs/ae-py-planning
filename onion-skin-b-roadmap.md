@@ -55,7 +55,14 @@ is either ordinary or already carried over from A.
 
 ---
 
-## Phase 0 — the gate
+## Phase 0 — the gate — **COMPLETE, 2026-09-09. BOTH GATE ROWS GREEN.**
+
+> B2 and B3 both pass. B5 passes. B1 answered (two binaries). B4 not run — and
+> now optional rather than pending: B5 showed shortcuts carry the
+> highest-frequency interaction, so the panel's widget budget is a Phase 2
+> scoping question, not a gate.
+>
+> **Phase 1 is unblocked.**
 
 Same discipline as Option A's Phase 0: **throwaway spikes, hardcoded inputs, log
 output, no onion-skin logic.** Measurements with a broken control, never
@@ -111,7 +118,25 @@ one working button that writes to the log.
   clicked. (Carried from pieFX S2 — a handler that fires on every click looks
   identical to a handler that works.)
 
-### B3 — Write: can the panel change the effect's params, and does AE notice?
+### B3 — Write: can the panel change the effect's params, and does AE notice? — **PASS, run 1, 2026-09-09**
+
+> **151 writes, zero selection changes.** `sel 23 -> 23`, `25 -> 25`, `-1 -> -1`,
+> never once different across the arrow. Option B's premise is measured.
+>
+> Three findings carried into Phase 2, all of them things the spike existed to
+> find:
+> 1. **Panel controls may not call AEGP project APIs from their window callback.**
+>    AE answers "no current context". They queue; an idle hook writes. Latency
+>    median 27 ms, p90 43 ms, max 54 ms — under two frames at worst.
+> 2. **Keyframed streams cannot be written** with `AEGP_SetStreamValue` (29
+>    `REFUSED` lines prove the guard fires). Phase 2 needs a keyframe-aware path
+>    or an honest refusal.
+> 3. **Undo groups must be balanced by a flag, not by call order under `ERR`** —
+>    `ERR(FUNC)` skips on a prior error, so `ERR(Start)` + bare `End()` is
+>    unbalanced on the error path. That was the operator's one-off "Group
+>    Mismatch", and it was our bug.
+>
+> Full scoring in `OnionSkin/B3/B3_RESULT.md`; log at `_spikes/B3_run1.txt`.
 
 The gate proper. Panel button calls `AEGP_SetStreamValue` on a slider of an
 `onionSkin` effect on a layer that is **not selected**.
@@ -172,7 +197,7 @@ If B4's number comes back ugly, B5 plus a minimal panel is the shipped product.
 |---|---|---|---|
 | B1 | one binary or two? | either answer passes | no — **ANSWERED: two** |
 | B2 | panel exists and persists? | docks, survives restart, responds with no selection | **yes — PASSED run 1** |
-| B3 | panel writes params, AE re-renders, selection intact? | repaint + selection unchanged + single-step undo | **yes** |
+| B3 | panel writes params, AE re-renders, selection intact? | repaint + selection unchanged + single-step undo | **yes — PASSED run 1** |
 | B5 | shortcut-assignable commands? | toggle fires with no selection | no — **PASSED run 1**, no-selection row still open |
 | B4 | what does a widget cost? | no pass/fail; produces a number | no — sets budget |
 
