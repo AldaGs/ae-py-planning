@@ -1,5 +1,25 @@
 # Onion Skin — Option A (viewport overlay) roadmap
 
+> ## CLOSED 2026-09-09 — Option A is dead, and the gate is why it cost only Phase 0
+>
+> Called after A3f run 1 in AE: the errors seen in normal use would cost the
+> customer. **The deciding number is not the 27.8% blind — that was fixable.** It
+> is the projection of the *fully repaired* detector: 86–95% recoverable across
+> the working range, but **65.3% at 100% zoom** and 49% at 150%. 100% is where
+> animators work, so a third of pan positions there would show no overlay at all.
+>
+> The limit is geometric. At 100% zoom the comp is larger than the panel, and a
+> transform recovered from the comp's own edges cannot be recovered when no edge
+> is on screen. Three architectures were tried for `t` — infer from input,
+> measure from edges, hold the last `s` — and each works when it is not needed
+> and fails when it is. That is a missing input, not an unfinished
+> implementation: **AE does not expose the comp viewer's pan.**
+>
+> Everything below is kept as the record of how that was established, and because
+> the product design, the tint/fade maths, the calibration comp and the
+> measurement harnesses all carry over to Option B unchanged.
+
+
 **Goal.** Onion skinning drawn *over* the comp viewer by an AEGP plug-in, with no
 effect applied to any layer and nothing added to the comp.
 
