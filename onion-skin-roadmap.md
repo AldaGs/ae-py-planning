@@ -166,6 +166,43 @@ window corrupts the read) and **self-capture** (it never sees our own overlay,
 retiring the alpha-gap constraint). Those are correctness arguments and they
 outrank the pixel count.
 
+### A3f — Blindness: can `t` be found when the comp bounds are off screen?
+
+**Why it exists.** A3e run 1 answered the latency question and turned up a bigger
+one. For **12.6%** of a 60 s run the detector rejected every capture and the
+overlay froze while the picture moved. Two causes, both measured off the
+recording: the comp drawn **larger than the panel** (here at `s > 0.675`), and
+the single fixed sample line **missing a small comp** at low zoom.
+
+**Why it is a gate rather than a chore.** High zoom is when onion skinning is
+wanted most, and high zoom is exactly where the detector is blind. This is not a
+corner case; it is the main case.
+
+**The ladder, cheapest first.**
+
+1. **Sample several rows and columns**, not one of each, and take the first
+   consistent answer. The pixels are already captured; the scan is O(w+h) per
+   line. Kills the missed-line cause outright.
+2. **One edge instead of two.** The scan currently needs both comp edges on an
+   axis. With `s` read independently (`views[i].options.zoom`, A3b: 0.19 ms, live
+   in motion), one visible edge gives `t` — `tx = x_left` or
+   `tx = x_right − s·comp_w`.
+3. **The residual**: comp covering the panel, no edge anywhere. Either
+   frame-to-frame correlation of the captured panel (anchor + delta, integrating
+   *pixels* — so unlike A3c it cannot miss a gesture), or degrade honestly.
+
+**Regardless of the ladder: blind must be visible as blind.** The probe held its
+last good `t` and kept drawing a confident box. That is the roadmap's founding
+failure — an onion skin that lies about where the previous drawing was — and it
+is the minimum correction whatever else is built.
+
+**Pass criteria.** Under 1% blind across a matrix that includes 100% zoom and a
+comp smaller than a quarter of the panel; and every remaining blind frame is
+*shown* as blind rather than drawn stale.
+
+**Fail → Option B, and on the merits rather than as a fallback.** B takes the
+transform from AE and is never blind, at any zoom, for free.
+
 ### A5 — macOS: is a capture-derived `t` viable there at all?
 
 **Why it outranks A4.** The product is meant to work on macOS, and *everything*
@@ -213,6 +250,7 @@ results cached keyed on comp time plus a change counter.
 | A2 identity | continue | **stop → Option B** |
 | A3 sync | continue | **stop → Option B** |
 | A3e slip | GDI ships | build WGC before Phase 1 |
+| A3f blindness | continue | **stop → Option B** |
 | A5 macOS capture | continue | Windows-only, **or stop → Option B** |
 | A4 cost | continue | reduce default skin count; re-judge |
 
@@ -221,7 +259,12 @@ negotiable in different currencies and must not be traded against each other:
 A3e buys engineering (WGC), A5 buys **scope** (a platform, or the whole option),
 A4 buys defaults.
 
-**Run order, as of 2026-09-09: A3e → A5 → A2 → A4.** A5 jumped ahead of A4
+**Run order, as of 2026-09-09 (after A3e run 1): A3f → A3e run 2 → A5 → A2
+→ A4.** A3e run 1 settled the latency question - the typical slip sits on the
+quantisation floor that WGC shares - so WGC's case now rests entirely on
+occlusion and self-capture, and it has dropped below A3f and A5.
+
+**Run order before that was: A3e → A5 → A2 → A4.** A5 jumped ahead of A4
 because it can invalidate work rather than merely delay it — every route to `t`
 on macOS needs a Screen Recording grant that After Effects, not the plug-in, must
 be given.
