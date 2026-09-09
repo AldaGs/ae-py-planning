@@ -1,5 +1,5 @@
 /*
- * B1 -- read the active comp's shape layers, write ae-physics-scene/1.
+ * B1 -- read the active comp's shape layers, write ae-physics-scene/2.
  *
  * Run:  File > Scripts > Run Script File...   (or drop into ScriptUI Panels)
  * Out:  a .json next to the project, chosen by a save dialog.
@@ -34,7 +34,23 @@
 
 (function () {
 
-var SCHEMA = "ae-physics-scene/1";
+var SCHEMA = "ae-physics-scene/2";
+
+/* /2 IS MOSTLY EMPTY, AND THAT IS THE POINT
+ * ------------------------------------------
+ * The seven Tier 0 features -- joints, zones, kinematic layers, collision
+ * groups, N outputs per layer, a bake target other than in place -- all reshape
+ * this document rather than extend it, and every one of them is a long way off.
+ * Retrofitting any one of them invalidates every scene ever written, so the
+ * SHAPE ships now with the arrays empty and the scalars at their defaults.
+ * Adding an implementation later is then additive.
+ *
+ * Nothing below is read from AE yet. A joint or a zone has no representation in
+ * a comp to read: the application owns them, and this script's job is to write
+ * the slot so the application has somewhere to put them. `scene_io.upgrade()`
+ * fills exactly these same defaults into a /1 document, which is what keeps
+ * B1's captured export usable. */
+var COLLIDE_WITH_ALL = 65535;
 var PRECISION = 4;          // px, well under the 1.0 simplify tolerance
 var WARNINGS = [];
 
@@ -291,6 +307,10 @@ function pathJson(sh) {
 function layerJson(L) {
     var ps = [];
     for (var i = 0; i < L.paths.length; i++) ps.push(pathJson(L.paths[i]));
+    /* `motion` and `static` say the same thing twice on purpose: the solver,
+     * the bake and b2_apply_bake.jsx all read the boolean, and `motion` is the
+     * three-valued form that "kinematic" needs. scene_io refuses a document
+     * where they disagree, so the duplication is checked rather than trusted. */
     return "{\"id\":" + L.id +
            ",\"name\":" + str(L.name) +
            ",\"anchor\":" + vec(L.anchor) +
@@ -298,6 +318,10 @@ function layerJson(L) {
            ",\"rotation_deg\":" + num(L.rotation_deg) +
            ",\"scale\":" + vec(L.scale) +
            ",\"scale_animated\":" + (L.scale_animated ? "true" : "false") +
+           ",\"motion\":\"dynamic\",\"static\":false" +
+           ",\"input_keyframes\":null" +
+           ",\"collision_group\":0,\"collide_with\":" + COLLIDE_WITH_ALL +
+           ",\"outputs\":1" +
            ",\"paths\":[" + ps.join(",") + "]}";
 }
 
@@ -350,6 +374,11 @@ chunks.push(",\"comp\":{\"name\":" + str(comp.name) +
 chunks.push(",\"sim\":{\"pixels_per_meter\":100,\"gravity_m_s2\":9.8," +
             "\"substeps\":8}");
 
+/* In place is what every bake has ever done -- it overwrites the source layer's
+ * Position and Rotation. That is destructive, and a careful user would rather
+ * be asked; the slot is here so the application can ask. */
+chunks.push(",\"output\":{\"target\":\"in_place\",\"comp_name\":null}");
+
 var ls = [];
 for (i = 0; i < layers.length; i++) ls.push(layerJson(layers[i]));
 chunks.push(",\"layers\":[" + ls.join(",") + "]");
@@ -366,6 +395,9 @@ chunks.push(",\"statics\":[" +
             "[[0,0],[0," + (H - 1) + "]]," +
             "[[" + W + ",0],[" + W + "," + (H - 1) + "]]," +
             "[[0,0],[" + W + ",0]]]");
+
+/* Empty, always, from this script. See the note beside SCHEMA. */
+chunks.push(",\"joints\":[],\"zones\":[]");
 
 var ws = [];
 for (i = 0; i < WARNINGS.length; i++) ws.push(str(WARNINGS[i]));

@@ -51,7 +51,7 @@ import preview
 import scene_io
 from sim import bake as bake_scene
 
-BAKE_SCHEMA_EXPECTED = "ae-physics-bake/2"
+BAKE_SCHEMA_EXPECTED = "ae-physics-bake/3"
 
 
 # --------------------------------------------------------------------------
@@ -198,7 +198,9 @@ def run(args) -> int:
 
     ids = [m["id"] for m in meta["layers"]]
     t0 = time.time()
-    bake = bake_scene(scene, ids)
+    # The bake target rides along from the scene, so the document says where
+    # it was meant to land rather than the applier assuming.
+    bake = bake_scene(scene, ids, meta["output"])
     elapsed = time.time() - t0
     bake["source"] = source_block(args.scene, doc, meta, args)
 

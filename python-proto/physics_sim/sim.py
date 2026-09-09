@@ -43,7 +43,32 @@ import geom
 # invented its own names. AE lets two layers share a name -- "Shape Layer 1"
 # twice is the default, not an edge case -- so the join key between a scene, its
 # bake and the preview is now the AE layer index. Name is for humans.
-SCHEMA = "ae-physics-bake/2"
+#
+# /3 is C1's half of the Tier 0 slots, and like `ae-physics-scene/2` it is
+# mostly empty on purpose. Three of the seven land here rather than in the
+# scene, because they describe the bake rather than the world:
+#
+#   layer.channels      per-frame velocity and angular velocity. The enabler
+#                       for squash-and-stretch, sound sync and triggers WITHOUT
+#                       re-simulating -- which is the whole reason it has to be
+#                       in the document and not recomputed by a consumer.
+#   contacts[]          collision events, top-level because a contact is
+#                       between two bodies, the same argument as joints.
+#   layer.extra_outputs one input layer becoming N output layers. The FIRST
+#                       output stays where it is, as `keyframes`, because it is
+#                       the privileged one: it is written back onto the source
+#                       layer, and moving it into an array would have doubled a
+#                       148 KB payload to say the same thing.
+#   output              where the bake lands, echoed from the scene so the
+#                       document is self-describing.
+#
+# `recorded` is the part that keeps the empties honest. An empty `contacts` can
+# mean "nothing touched anything" or "nobody was writing them down", and those
+# are different facts -- a squash-and-stretch consumer reading the first as the
+# second silently produces no squash on a scene full of impacts.
+SCHEMA = "ae-physics-bake/3"
+
+BAKE_TARGET_DEFAULT = {"target": "in_place", "comp_name": None}
 
 
 # --------------------------------------------------------------------------
@@ -321,9 +346,14 @@ def replay_from_keyframes(handle: Handle, track: dict, frame: int):
     return out
 
 
-def bake(scene: Scene, ids: list[int] | None = None) -> dict:
+def bake(scene: Scene, ids: list[int] | None = None,
+         output: dict | None = None) -> dict:
     """`ids` are the AE layer indices, in scene order. Defaults to 1..n, which
-    is what the synthetic Phase A scenes want; a real comp passes its own."""
+    is what the synthetic Phase A scenes want; a real comp passes its own.
+
+    `output` is the scene's bake target, carried through unchanged. It defaults
+    to in place, which is what every bake before /3 did.
+    """
     handles, tracks = simulate(scene)
     if ids is None:
         ids = list(range(1, len(handles) + 1))
@@ -332,6 +362,10 @@ def bake(scene: Scene, ids: list[int] | None = None) -> dict:
     ppm = scene.pixels_per_meter
     return {
         "schema": SCHEMA,
+        "output": dict(output or BAKE_TARGET_DEFAULT),
+        # Slots, and the flags that say so. See the note beside SCHEMA.
+        "recorded": {"channels": False, "contacts": False},
+        "contacts": [],
         "comp": {
             "width": scene.width, "height": scene.height,
             "fps": scene.fps, "duration_frames": scene.duration_frames,
@@ -355,11 +389,16 @@ def bake(scene: Scene, ids: list[int] | None = None) -> dict:
                 "keyframes": ({"position": [], "rotation": []}
                               if getattr(h.spec, "static", False)
                               else tracks[i]),
+                # /3 slots. Empty, and `recorded` above says which kind of
+                # empty this is.
+                "channels": {"velocity": [], "angular_velocity": []},
+                "extra_outputs": [],
             }
             for i, h in enumerate(handles)
         ],
     }
 
 
-def bake_json(scene: Scene, ids: list[int] | None = None) -> str:
-    return json.dumps(bake(scene, ids), indent=2, sort_keys=True)
+def bake_json(scene: Scene, ids: list[int] | None = None,
+              output: dict | None = None) -> str:
+    return json.dumps(bake(scene, ids, output), indent=2, sort_keys=True)

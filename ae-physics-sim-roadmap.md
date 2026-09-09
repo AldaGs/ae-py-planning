@@ -39,8 +39,13 @@ tweens. 116 checks across eight steps, all green.
 
 **C0 is complete too — all three spikes pass** (2026-09-07/08). The architecture
 gate is green, the protocol choice turned out to be free, and Wall I's cost is
-gone. **C1 is next.** Evidence in `ae_physics_simulator/SPIKES.md`, which also
-records what each result does *not* cover.
+gone. Evidence in `ae_physics_simulator/SPIKES.md`, which also records what each
+result does *not* cover.
+
+**C1 has started. C1.0 — the schema — is done** (2026-09-09):
+`ae-physics-scene/2` and `ae-physics-bake/3` carry all seven Tier 0 slots,
+21/21 checks in `c1_schema.py`. The shell is next, and it now has a settled
+document to build against.
 
 | Step | What it settled | Checks |
 |---|---|---|
@@ -120,9 +125,26 @@ pipe transport.
 
 ### Then C1–C5 — the application
 
-- [ ] **C1.** ▶ **next.** Tauri shell: window, scene list, B3's parameters as
-      real controls, settings persisted. **Owes `ae-physics-scene/2` + `ae-physics-bake/3`
-      carrying every Tier 0 slot** (below), even where the arrays stay empty.
+- [ ] **C1.** ▶ **in progress.**
+  - [x] **C1.0 — the schema. DONE** (2026-09-09). `ae-physics-scene/2` and
+        `ae-physics-bake/3` carry every Tier 0 slot, arrays empty and scalars
+        at their defaults. 21/21 checks in `python-proto/physics_sim/c1_schema.py`.
+        Three things are worth carrying forward. **/1 is read, not migrated** —
+        `scene_io.upgrade()` is the only code that knows the difference, so
+        B1's captured export and hand-authored fixture stay usable as evidence;
+        the fixture and its upgrade bake byte-identically, and the September
+        bake of the real comp reproduces to the byte once its /3 fields are
+        stripped. **A filled slot is refused, not ignored** — `load_scene`
+        names the slot and the phase that implements it, because a layer marked
+        kinematic and simulated as dynamic knocks over exactly the stack it was
+        authored to knock over, only wrongly. And **an empty array is two
+        facts**: the bake's `recorded` flags separate "nothing touched anything"
+        from "nobody was writing it down".
+        **Still owed: a run in AE.** No comp has yet produced a /2 document —
+        every /2 in existence came from the upgrade path. `b1_read_shapes.jsx`
+        emits /2 and passes `jsx_check.py`, which is not the same as having run.
+  - [ ] **C1.1 — the shell.** Tauri window, scene list, B3's parameter set as
+        real controls, settings persisted.
 - [ ] **C2.** The viewport: `preview.py`'s renderer becomes the canvas, scrubbing
       the bake before it is applied. A5's argument becomes the main surface.
 - [ ] **C3.** Staleness (Wall K) survives the GUI — re-read and compare, never
@@ -144,18 +166,23 @@ pipe transport.
 Reasoning lives in the plan under **Feature scope**. Sorted by whether a feature
 reshapes the document model, not by popularity.
 
-### Tier 0 — schema slots, before C1 ships a schema
+### Tier 0 — schema slots, **shipped empty in C1.0**
 
 Slots, not implementations. Retrofitting any of these reshapes every document
-ever written.
+ever written, which is why the shape landed before the shell. Each box below is
+now a *slot that exists and is refused when filled* — ticking it later means
+building the behaviour, not changing the document.
 
-- [ ] `joints[]` as a top-level array (relations between bodies, anchors in comp space)
-- [ ] `zones[]` — wind, magnets, explosions
-- [ ] animated / kinematic bodies carrying their own input keyframes
-- [ ] velocity + contact events in the bake (enables squash, sound sync, triggers)
-- [ ] bake target: a new comp, not only in place
-- [ ] one input layer may produce N output layers
-- [ ] collision groups + collide-with mask
+- [x] `joints[]` as a top-level array (relations between bodies, anchors in comp space) — slot in `ae-physics-scene/2`
+- [x] `zones[]` — wind, magnets, explosions — slot in `ae-physics-scene/2`
+- [x] animated / kinematic bodies carrying their own input keyframes — `layer.motion` + `layer.input_keyframes`
+- [x] velocity + contact events in the bake (enables squash, sound sync, triggers) — `layer.channels` + `contacts[]`, with `recorded` flags
+- [x] bake target: a new comp, not only in place — `output.target`, refused by `b2_apply_bake.jsx` when it is not `in_place`
+- [x] one input layer may produce N output layers — `layer.outputs` + the bake's `extra_outputs[]`
+- [x] collision groups + collide-with mask — `layer.collision_group` + `layer.collide_with` (16-bit)
+
+None of them is implemented. All of them are refused by name rather than
+ignored — see C1.0 above for why that is the load-bearing half.
 
 ### Tier 1 — table stakes, purely additive
 

@@ -5,12 +5,18 @@
     "height": 1080,
     "width": 1920
   },
+  "contacts": [],
   "layers": [
     {
       "anchor_offset": [
         0.0,
         0.0
       ],
+      "channels": {
+        "angular_velocity": [],
+        "velocity": []
+      },
+      "extra_outputs": [],
       "id": 1,
       "index": 1,
       "keyframes": {
@@ -1358,6 +1364,11 @@
         0.0,
         0.0
       ],
+      "channels": {
+        "angular_velocity": [],
+        "velocity": []
+      },
+      "extra_outputs": [],
       "id": 2,
       "index": 2,
       "keyframes": {
@@ -2705,6 +2716,11 @@
         0.0,
         0.0
       ],
+      "channels": {
+        "angular_velocity": [],
+        "velocity": []
+      },
+      "extra_outputs": [],
       "id": 3,
       "index": 3,
       "keyframes": {
@@ -4048,7 +4064,15 @@
       "static": false
     }
   ],
-  "schema": "ae-physics-bake/2",
+  "output": {
+    "comp_name": null,
+    "target": "in_place"
+  },
+  "recorded": {
+    "channels": false,
+    "contacts": false
+  },
+  "schema": "ae-physics-bake/3",
   "sim": {
     "engine": "pymunk",
     "gravity_px_s2": [

@@ -866,3 +866,126 @@ one command, and testing the functions would not test the tool.
 Determinism now covers the entire loop rather than just the solver: two runs of
 the same command produce identical bytes apart from the timestamp, and a 1e-9
 change to gravity produces different ones.
+
+---
+
+# C1.0 — the schema the application has to write
+
+`python c1_schema.py` → 21/21 checks. `ae-physics-scene/2` and
+`ae-physics-bake/3`.
+
+C1 ships an application, and an application writes documents that outlive it.
+The plan's **Tier 0** is the list of features that *reshape* those documents
+rather than extend them. None of them is being built now; each of them,
+retrofitted later, invalidates every document written before it. So this step
+ships the **shape** — arrays empty, scalars at their defaults — and the
+implementations become additive changes.
+
+Nothing here is a measurement of AE. It is a claim about documents, and the
+claim is: *the slots are shape only, and nothing behaves differently*.
+
+## The seven slots, and where each one landed
+
+| slot | lives in | why there |
+|---|---|---|
+| `joints[]` | scene, top level | a joint is a relation **between** bodies, not a property of one layer |
+| `zones[]` | scene, top level | wind, magnets, explosions — same argument |
+| `layer.motion` | scene, per layer | `dynamic` / `static` / `kinematic`; /1's boolean was the two-valued form |
+| `layer.input_keyframes` | scene, per layer | a kinematic layer is driven by its **own** AE animation, so it arrives carrying it |
+| `layer.collision_group` / `collide_with` | scene, per layer | a group index and a 16-bit mask |
+| `layer.outputs` | scene, per layer | one input layer becoming N — Wall J's island split and pre-fracture are the same capability |
+| `output` | both | where the bake lands: in place, or a new comp |
+| `layer.channels` | bake | per-frame velocity and angular velocity |
+| `contacts[]` | bake, top level | collision events — top-level for the same reason joints are |
+| `layer.extra_outputs` | bake, per layer | outputs 2..N |
+
+Three of them sit in the **bake** rather than the scene because they describe
+the result rather than the world. The plan lists seven; the document carries ten
+fields, because "the bake carries velocity and contact events" is two channels
+and two arrays.
+
+## The first output stays where it is
+
+The obvious shape for N-outputs-per-layer is an `outputs[]` array with the
+keyframes inside it. That was rejected: it would have moved a 148 KB payload
+into an array to say the same thing it already said, and every consumer — B2's
+applier included — would have been rewritten to reach one level deeper for the
+common case. So the **first** output keeps its place as `layer.keyframes`,
+because it is the privileged one: it is what gets written back onto the source
+layer. `extra_outputs[]` holds 2..N and is empty.
+
+## An empty array is two different facts
+
+`contacts: []` can mean *nothing touched anything* or *nobody was writing them
+down*, and a consumer that cannot tell them apart silently produces no squash on
+a scene full of impacts. So the bake carries `recorded: {channels: false,
+contacts: false}` beside them. It costs two booleans and it is the difference
+between an empty slot and a lie.
+
+## The refusal, which is the load-bearing decision
+
+The tempting way to ship a slot is to accept the field and ignore it. That is
+how a slot becomes a bug: a layer marked `kinematic` and simulated as dynamic
+knocks over exactly the stack it was authored to knock over, only wrongly, and
+the document records that it was asked for.
+
+So `load_scene` **refuses** a filled slot by name, and says which phase
+implements it. Six of them, each with the harm the silent version would have
+done:
+
+| slot filled | ignored, it would have |
+|---|---|
+| a kinematic layer | simulated it as dynamic |
+| a joint | let the bodies fall apart, with the document saying they were joined |
+| a zone | produced no wind, and nothing to say so |
+| `outputs: 4` | returned one layer, and lost three shards |
+| a collision mask | collided everything with everything — the opposite of what the mask said |
+| `output.target: new_comp` | overwritten the source comp, the exact outcome the setting exists to avoid |
+
+`b2_apply_bake.jsx` makes the same refusal on its own side: it accepts **both**
+`/2` and `/3` — nothing in /3 changes what a keyframe is — but a bake asking to
+land in a new comp is refused rather than applied in place.
+
+## /1 is read, not migrated
+
+`b1_ae_export.json` and `b1_fixture_scene.json` are the evidence behind B1's 22
+checks: one captured from a real comp, one hand-authored. A hard cut to /2 would
+have re-baselined all of it against a document no run in AE has ever produced.
+So `upgrade()` is the only code that knows the difference, it runs before both
+`validate()` and `load_scene()`, and nothing downstream carries a version
+branch. It is pure and idempotent, and both are checked rather than asserted.
+
+The claim that /2 is shape-only is checked twice, at two scales:
+
+- the fixture and its upgrade produce **byte-identical** bakes, 53,873 bytes;
+- the September bake of the real comp is reproduced through `b3_loop.py` and,
+  stripped of its /3 fields, is byte-identical to `b3_bake.json` — **964
+  keyframes across 3 layers**, 24,336 bytes. /3 added fields and changed no
+  number that reaches AE.
+
+## The instrumentation fault, again
+
+Section 3 injects a malformed value into every slot and confirms each is
+rejected. The first version of that table read **16/16 caught** and was wrong:
+the joint cases were written against layer ids 1 and 2, and the fixture's ids
+are 3, 4 and 7 — so every one of them was rejected for *naming a layer that is
+not in this scene*, and the duplicate-id check was never reached while looking
+verified.
+
+This is the same fault B2 and C0.3 each produced once: **a check that confirms
+"something complained" instead of "this complained"**. Every case now carries the
+sentence it is supposed to provoke, and is matched against it. 17/17, for the
+stated reasons.
+
+## What this cannot check
+
+The jsx emitter needs AE, like all of B1's script half. Section 5 does the one
+thing possible offline: it reads `b1_read_shapes.jsx` as text and compares the
+field names it emits against the ones `scene_io` fills in — the same drift class
+the plan already worries about for `compose_point`, two implementations of one
+contract in two languages, edited apart. It confirms the version string matches,
+that all eight scene-side slots are emitted, and that the applier's accepted-
+schema list is exactly `/2` and `/3`.
+
+**A run in AE is still owed**: no comp has ever produced a /2 document. Until
+one does, every /2 in existence came from `upgrade()`.

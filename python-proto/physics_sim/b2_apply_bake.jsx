@@ -1,5 +1,5 @@
 /*
- * B2 -- apply an ae-physics-bake/2 to the layers it was baked from, then
+ * B2 -- apply an ae-physics-bake/3 to the layers it was baked from, then
  * measure what AE actually stored.
  *
  * Run:  File > Scripts > Run Script File...
@@ -38,7 +38,24 @@
 
 (function () {
 
-var BAKE_SCHEMA = "ae-physics-bake/2";
+/* /3 added slots this script does not read -- per-frame velocity channels,
+ * contact events, extra output layers, a bake target. It applies keyframes onto
+ * existing layers, and nothing in /3 changes what a keyframe is: the `layers`
+ * array, the ids, the names and the `keyframes` block are identical to /2. So
+ * BOTH are accepted, and a /2 bake made before today still applies.
+ *
+ * The one slot that could change this script's behaviour is `output.target`,
+ * and it is refused rather than ignored: a bake asking for a new comp, applied
+ * in place, would overwrite the very layers the user asked to keep. */
+var BAKE_SCHEMA = "ae-physics-bake/3";
+var BAKE_SCHEMAS_OK = ["ae-physics-bake/2", "ae-physics-bake/3"];
+
+function schemaAccepted(v) {
+    for (var k = 0; k < BAKE_SCHEMAS_OK.length; k++) {
+        if (BAKE_SCHEMAS_OK[k] === v) return true;
+    }
+    return false;
+}
 var SAMPLE_STRIDE = 17;     // coprime with everything, so samples do not land
                             // on a pattern; keeps the report small
 var MEASURE_BOTH = true;    // time the naive path as well as the bulk one
@@ -155,9 +172,16 @@ var bf = File.openDialog("Choose the bake JSON", "*.json");
 if (bf === null) return;
 var bake = parseJson(readFile(bf));
 
-if (bake.schema !== BAKE_SCHEMA) {
+if (!schemaAccepted(bake.schema)) {
     alert("That file says schema " + bake.schema + ", this script applies " +
-          BAKE_SCHEMA + ".");
+          BAKE_SCHEMAS_OK.join(" and ") + ".");
+    return;
+}
+
+if (bake.output && bake.output.target && bake.output.target !== "in_place") {
+    alert("That bake asks to land in '" + bake.output.target +
+          "', and this script only writes onto the layers the bake came " +
+          "from.\n\nNothing was written.");
     return;
 }
 
