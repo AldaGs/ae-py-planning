@@ -125,6 +125,70 @@ behind the picture. Expect to need `SetTimer(NULL, 0, ...)`, which pieFX proved
 - Overlay hides correctly when the viewer is occluded, minimised, or on a hidden
   tab.
 
+### A3e — Slip: is one frame of capture latency good enough?
+
+**The question.** A3c killed inferring `t` from input, so `t` is *measured* from a
+capture of the viewer, and A3d2 measured that capture at 16.7 ms — one
+composition sync, one display frame. A3e asks the only version of "is that good
+enough" that can be answered: **how many pixels does the overlay slip, and under
+which gesture?**
+
+**Scope it before fearing it.** `t` changes only under pan, zoom, panel resize and
+Fit. It does not change while scrubbing the CTI, which is the dominant onion-skin
+gesture — so this latency never touches the main use case. And A3c incidentally
+measured a real wheel-scroll at ~160 px/s, which at 16.7 ms is **2.7 px**.
+
+**Method.** `os_A3e.exe`, out of process and needing no AE at all: the capture
+recovers both `s` (span ÷ comp size, two axes) and `t` (the top-left crossing).
+Capture runs on its **own thread** — the 16.7 ms is a sync wait, not CPU, so it
+never lands in the paint path. This is the shipping configuration, not a stand-in.
+
+Two boxes: **green** from the newest capture, **magenta** from a deliberately
+100 ms-stale one. Magenta is a control **of the instrument** — an analysis that
+cannot separate it from green was never able to detect a lag problem, and so may
+not report the absence of one.
+
+Two measurements, and neither is sufficient alone: the paint log gives sub-pixel
+slip at 60 Hz but measures **the pipeline only** and is reported as a **lower
+bound**; the **screen recording is what the verdict is read from**.
+
+**Pass criteria — pre-committed, judged on the video, binned by gesture.**
+
+- at rest ≤ 1 px, wheel scroll ≤ 5 px, hand drag ≤ 20 px → **GDI ships**, and
+  Windows.Graphics.Capture becomes a polish item rather than a gate.
+- worse → **WGC required on Windows**, before Phase 1.
+- magenta not separable from green while moving → **INVALID**; fix and re-run.
+
+**Note that WGC's real case is not latency.** Both are paced by the same display
+frames, so half a frame of quantisation slip is unavoidable either way. WGC's
+actual wins are **occlusion** (a screen blit reads the desktop, so any overlapping
+window corrupts the read) and **self-capture** (it never sees our own overlay,
+retiring the alpha-gap constraint). Those are correctness arguments and they
+outrank the pixel count.
+
+### A5 — macOS: is a capture-derived `t` viable there at all?
+
+**Why it outranks A4.** The product is meant to work on macOS, and *everything*
+above rests on measuring `t` from a capture. On macOS both
+`CGWindowListCreateImage` and ScreenCaptureKit require the **Screen Recording TCC
+permission**, granted per-application — and the application prompted is **After
+Effects**, not the plug-in. That is a bigger product cost than 16.7 ms and it
+applies to every capture route, so it can invalidate Windows work rather than
+merely follow it.
+
+**Pass criteria.**
+
+- AE prompts once, the grant persists across AE restarts and plug-in updates.
+- Capture cost measured, and the viewer window individually capturable.
+- And the non-technical one, decided explicitly: **is "After Effects wants to
+  record your screen" an acceptable install experience?**
+
+**Fail is not automatically fatal to A** — it is fatal to *cross-platform* A. The
+honest response is to choose deliberately between Windows-only and Option B, now,
+rather than discovering the choice halfway through Phase 2. pieFX's
+both-platforms precedent does not carry: that work needed no capture and no TCC
+grant.
+
 ### A4 — Cost: can we get frames N±k fast enough?
 
 **The question.** Render neighbouring frames via `AEGP_RenderAndCheckoutFrame` and
@@ -148,9 +212,19 @@ results cached keyed on comp time plus a change counter.
 | A1 transform | continue | **stop → Option B** |
 | A2 identity | continue | **stop → Option B** |
 | A3 sync | continue | **stop → Option B** |
+| A3e slip | GDI ships | build WGC before Phase 1 |
+| A5 macOS capture | continue | Windows-only, **or stop → Option B** |
 | A4 cost | continue | reduce default skin count; re-judge |
 
-A1–A3 are hard stops. A4 is the only one with a negotiable outcome.
+A1–A3 are hard stops. A3e, A5 and A4 all have negotiable outcomes, but they are
+negotiable in different currencies and must not be traded against each other:
+A3e buys engineering (WGC), A5 buys **scope** (a platform, or the whole option),
+A4 buys defaults.
+
+**Run order, as of 2026-09-09: A3e → A5 → A2 → A4.** A5 jumped ahead of A4
+because it can invalidate work rather than merely delay it — every route to `t`
+on macOS needs a Screen Recording grant that After Effects, not the plug-in, must
+be given.
 
 **Time box.** If A1 has not passed by the end of its box, that *is* the fail
 result. Extending the box is how sunk cost gets spent.
@@ -173,6 +247,12 @@ The pieFX precedent is good here: an overlay window and a local event monitor ar
 the same shape on both platforms, and the Mac plug-in was authored on Windows and
 compiled nearly first try. But A1 and A2 must be **re-measured** on macOS, not
 assumed — viewer geometry is platform-specific in a way the gesture work was not.
+
+**And the pieFX precedent stops at the capture.** That work needed no screen
+capture and therefore no Screen Recording grant; this does, for `t`, on every
+frame. That is why the permission question is not deferred to this phase but
+pulled all the way forward into Phase 0 as **A5** — a mac answer arriving here
+would arrive after Phase 2 had been written against an assumption.
 
 ---
 
