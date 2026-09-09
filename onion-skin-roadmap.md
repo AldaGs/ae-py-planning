@@ -196,7 +196,36 @@ corner case; it is the main case.
    *pixels* — so unlike A3c it cannot miss a gesture), or degrade honestly.
    **Deliberately not built**: ship honest degradation and let usage decide.
 
-**Stages 1 and 2 are built and self-tested offline (2026-09-09);** the detector's
+**Run 1 result (2026-09-09): stage 2 PASSES, stage 1a PASSES, the gate FAILS.**
+Blindness is now visible as blindness — video and paint log agree to within a
+point on green / amber / hidden. Per-axis acceptance recovered 18.3% of captures
+that were fully blind before. But 27.8% were still fully blind against a <1%
+criterion, and *none of it was the unrecoverable regime*.
+
+**And the ladder above is in the wrong order.** A geometry sweep over every
+reachable pan position, worst axis:
+
+| zoom | 5 lines, 2 edges | grid 16, 2 edges | **grid 16, 1 edge** |
+|---|---|---|---|
+| 0.05 | 0.0% | 82.1% | **91.4%** |
+| 0.25 | 35.0% | 35.0% | **93.7%** |
+| 0.50 | 2.0% | 2.0% | **95.2%** |
+| 1.00 | 0.0% | 0.0% | **65.3%** |
+
+More sample lines only matters below ~20% zoom. From 25% up, the binding
+constraint is the two-edge requirement, and **only the one-edge solve moves it**.
+So rung 2 is a free tidy-up and rung 3 is the main event.
+
+**The one-edge solve needs `s`, and `s` cannot be held.** The zoom changed across
+**6 of 7** blind runs and a held value would be a median 1463 ms old — blindness
+is *caused* by zooming, so the zoom is exactly what changes while blind. The same
+shape as the A3c lesson. `s` must come from `views[i].options.zoom` (A3b:
+0.19 ms, live during a drag), which means **a component inside AE publishing one
+double to the overlay process**. The overlay itself stays out of process; what
+must never return is drawing or capture on AE's UI thread, which is what caused
+the freezes. That is the open decision.
+
+**Stages 1 and 2 were built and self-tested offline (2026-09-09);** the detector's
 new within-axis vote is proven against synthetic panels including three broken
 controls, and the cross-axis zoom check is *kept* for when both axes are present,
 so the fix added a control rather than trading one away.
