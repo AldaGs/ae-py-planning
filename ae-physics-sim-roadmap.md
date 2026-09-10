@@ -54,6 +54,8 @@ anyway, because the bake's `source` block describes the scene and the apply
 script can only see the comp. The shell now re-reads and compares hashes (C3,
 built and unit-tested, not yet exercised live).
 
+**C1 is closed, Wall I is spent and Wall K is guarded.** The one thing carried forward is a re-measurement: the apply's per-key figure was taken on a Debug `/Od` build and means nothing until it is read again off a Release one.
+
 **The next step is C2, the viewport.**
 
 | Step | What it settled | Checks |
@@ -211,21 +213,45 @@ pipe transport.
         or with `APPDATA` unset. `solver.rs` does not touch the child
         environment. Fixed with a venv at `.venv-physics` pinned as
         `paths.python`, which is the case `settings.rs` already anticipated.
-- [~] **Wall I, spent.** C0.3's native keyframing is **wired into the product**
-      (2026-09-10): `apply_bake` in the AEGP, an Apply button in the shell, and
-      Wall K checked in the backend before the bridge is touched so a front end
-      cannot bypass it. `b2_apply_bake.jsx` stays as the reference
-      implementation — every native number is a comparison against it, and one
-      you can no longer run is one you can no longer check.
-      The O(n^2) auto-bezier pass is **skipped**, per C0.3. But C0.3 measured
-      that it was safe to skip and *assumed why*, and the product now depends on
-      it — so the apply reads the flag back on a spread of keys and reports the
-      count. If AE stops behaving the way C0.3 measured, the window says so
-      rather than bowing every motion path invisibly.
-      **Built and unit-tested, NOT yet run in AE.** The `.aex` needs an
-      elevated copy into the Plug-ins folder, and the numbers above are C0.3's,
-      not this code's. Nothing here is verified until an apply runs from the
-      window and the reported us/key is read off a real comp.
+- [x] **Wall I, spent. VERIFIED IN AE** (2026-09-10). C0.3's native keyframing
+      is wired into the product and has now run on a real comp:
+      `apply_bake` in the AEGP, an Apply button in the shell, Wall K checked in
+      the backend before the bridge is touched so a front end cannot bypass it.
+      `b2_apply_bake.jsx` stays as the reference implementation — every native
+      number is a comparison against it, and one you can no longer run is one
+      you can no longer check.
+
+      **1,446 keyframes across 3 layers in 380 ms**, against ExtendScript's
+      **5,412 ms** on the same key count: **14x wall-clock**, and that is the
+      number that matters to a person waiting.
+
+      **The per-key figure did NOT match the projection, and the reason was the
+      build.** 262.4 us/key against C0.3's 117.7 — 2.2x the wrong way, on work
+      that should have been CHEAPER, since half of these keys are Rotation and
+      Rotation has no tangent pass at all. The `.aex` had been built
+      `Configuration=Debug`, which is `/Od`. Same trap as the 9.7x already on
+      record for a Release vcxproj with no `<Optimization>` element; here the
+      element was right and the CONFIGURATION was wrong, which no amount of
+      reading the vcxproj would have caught. **Re-measure on Release before
+      quoting any per-key number from this run.**
+
+      **The skipped auto-bezier pass holds.** No warning fired: the
+      SPATIAL_AUTOBEZIER flag came back clear on every sampled key of a real
+      apply, so the O(n^2) phase really is unnecessary. This still does not
+      separate C0.3's two candidate mechanisms — it confirms the behaviour, not
+      the explanation — but the product depends on the behaviour, and the
+      behaviour is now observed rather than assumed.
+- [x] **C3. Staleness (Wall K) survives the GUI. CLOSED** (2026-09-10). The
+      guard refused a bake after a layer was nudged, and *Apply anyway*
+      overrode it and applied. Both halves of the design confirmed live: it
+      catches the edit the `source` block cannot see, and it reports rather
+      than blocks, because re-reading after moving a layer you did not simulate
+      is legitimate and only the person knows which it was.
+- [x] **The shell is not a second implementation of the loop.** Its bake and a
+      hand-run `b3_loop.py` on the same scene with the same arguments are
+      **34,111 bytes each and differ only in `made_at`** (01:48:08 vs
+      01:52:17). B3's claim that the middle of the loop is ONE COMMAND survives
+      the GUI.
 - [ ] **C2.** The viewport: `preview.py`'s renderer becomes the canvas, scrubbing
       the bake before it is applied. A5's argument becomes the main surface.
 - [~] **C3.** Staleness (Wall K) survives the GUI — re-read and compare, never
