@@ -320,6 +320,38 @@ pipe transport.
 Reasoning lives in the plan under **Feature scope**. Sorted by whether a feature
 reshapes the document model, not by popularity.
 
+### Per-object physics — requested 2026-09-10, and cheaper than it looks
+
+Mass, friction and bounce per layer rather than one set for the whole scene.
+
+**The solver is already per-body.** `sim.PolyBody` carries `density`,
+`friction` and `elasticity` on every spec, and `sim` reads them per shape when
+it builds the pymunk bodies. What imposes the global is four lines in
+`b3_loop.py`, which stamp `args.friction` and `args.elasticity` over every body
+before stepping. So this is not a physics change; it is a place to put the
+numbers and a UI to type them in.
+
+By the plan's sorting axis this is **not Tier 0**: per-layer scalars are
+additive and do not reshape the document, so nothing has to ship empty ahead of
+them. Three things do have to be decided when it is built:
+
+- **"Mass" is not a field.** The solver derives mass from `density * area`
+  (`geom.compound_mass_properties`). A mass slider on two layers of different
+  size means density = mass / area, computed per layer, and that back-solve has
+  to happen somewhere visible — otherwise setting two layers to "mass 5" makes
+  the small one enormously denser and the collisions stop reading as physical.
+  Density is the honest control; mass is the one people want. Offering both and
+  showing the other is probably right.
+- **Wall K's record has to keep up.** The bake's `source.settings` carries the
+  scene-wide `friction` and `elasticity` as provenance. Per-layer values that
+  are not recorded there make the block a partial description of the run, and
+  the block is what tells you whether a bake still means anything.
+- **A per-layer value that is absent is not zero.** It inherits the scene
+  value, and the difference between "not set" and "set to 0.0" is the
+  difference between a default and a deliberately frictionless layer. Same
+  distinction C1.0 made for empty slots: `frames: null` means the comp's
+  duration and `0` is a real, useless request.
+
 ### Tier 0 — schema slots, **shipped empty in C1.0**
 
 Slots, not implementations. Retrofitting any of these reshapes every document
