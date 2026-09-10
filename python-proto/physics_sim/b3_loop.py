@@ -233,6 +233,11 @@ def run(args) -> int:
         fh.write(text)
     print(f"   wrote {args.out} ({len(text) / 1024:.0f} KB)")
 
+    if args.render_model:
+        n = write_render_model(args.render_model, scene, meta, bake)
+        print(f"   wrote {args.render_model} ({n / 1024:.0f} KB) -- "
+              f"the viewport's geometry")
+
     if not args.no_preview:
         layers = [preview.PreviewLayer(m["id"], m["name"], b.parts, b.anchor)
                   for m, b in zip(meta["layers"], scene.bodies)]
@@ -256,6 +261,77 @@ def run(args) -> int:
         sheet.save(args.preview)
         print(f"   wrote {args.preview} (frames {ts}) -- look before applying")
     return 0
+
+
+RENDER_SCHEMA = "ae-physics-render/1"
+
+
+def write_render_model(path, scene, meta, bake):
+    """The polygons a viewport needs, and nothing it can compute itself.
+
+    C2 puts a canvas in the shell, and the question that decides its shape is
+    which half of the drawing each side owns.
+
+    The GEOMETRY half stays here without argument. Turning a comp into polygons
+    is bezier flattening, group transforms, layer scale and convex decomposition
+    -- the ~1,200 lines A3 and A4 verified -- and a second implementation of
+    that in TypeScript would be a second place for a 10 px error to hide, which
+    is exactly what B1 found when A3's layer-space assumption turned out to be
+    false in AE.
+
+    The TRANSFORM half is three lines, `position + R(theta) * (v - anchor)`,
+    and the viewport cannot avoid owning it: it is what scrubbing IS. That is
+    also why preview.py exists at all -- it re-derives the transform from the
+    JSON alone, so it can catch a convention fault (a y-up flip, degrees baked
+    as radians, Position written as the COM) that sim.replay_from_keyframes
+    shares assumptions with and cannot. A third independent consumer is more of
+    that same evidence, not drift, PROVIDED somebody checks they agree. That
+    check is `c2_render_model.py`.
+
+    So this file is deliberately dumb: parts already in layer space, an anchor,
+    and the comp box. No beziers, no tangents, no schema.
+
+    WHY `rest` IS HERE.
+
+    A pinned layer has no keyframes -- B3's rule, because writing even a
+    constant would overwrite the user's own placement. The contact sheet above
+    works around that by synthesising a standing pair, and a viewport that did
+    not would simply lose the floor: everything would fall through a world with
+    no visible ground. So the resting pose ships explicitly rather than being
+    something the front end has to know to invent.
+    """
+    idx = {m["id"]: b for m, b in zip(meta["layers"], scene.bodies)}
+    statics = {lay["id"]: lay["static"] for lay in bake["layers"]}
+
+    model = {
+        "schema": RENDER_SCHEMA,
+        "comp": {
+            "width": scene.width,
+            "height": scene.height,
+            "fps": scene.fps,
+            "duration_frames": scene.duration_frames,
+        },
+        # The world box the reader emits. B2 found the floor-only default let a
+        # rolling layer reach 838,591 px; drawing the walls means a viewer can
+        # SEE the box the sim was run in rather than infer it.
+        "statics": [[list(a), list(b)] for a, b in scene.statics],
+        "layers": [],
+    }
+    for m in meta["layers"]:
+        b = idx[m["id"]]
+        model["layers"].append({
+            "id": m["id"],
+            "name": m["name"],
+            "anchor": list(b.anchor),
+            "parts": [[list(v) for v in part] for part in b.parts],
+            "static": bool(statics.get(m["id"], False)),
+            "rest": {"position": list(b.position), "rotation": b.angle_deg},
+        })
+
+    text = json.dumps(model, separators=(",", ":"), sort_keys=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    return len(text)
 
 
 def check(args) -> int:
@@ -284,6 +360,9 @@ def parser():
     p.add_argument("scene", help="scene JSON from b1_read_shapes.jsx")
     p.add_argument("--out", default="b3_bake.json")
     p.add_argument("--preview", default="b3_preview.png")
+    p.add_argument("--render-model", default=None,
+                   help="also write the viewport's geometry (polygons in "
+                        "layer space plus anchors) as ae-physics-render/1")
     p.add_argument("--gravity", type=float, default=9.8,
                    help="m/s^2, positive is down (default 9.8)")
     p.add_argument("--ppm", type=float, default=100.0,
