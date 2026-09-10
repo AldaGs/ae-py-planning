@@ -155,7 +155,19 @@ The gate proper. Panel button calls `AEGP_SetStreamValue` on a slider of an
   (params *are* varying), but the effect reads neighbouring frames, so record
   what the cache actually does rather than reasoning about it.
 
-### B4 — Cost: what does one real widget cost?
+### B4 — Cost: what does one real widget cost? — **ANSWERED BY DOING IT, 2026-09-09**
+
+> Never run as a spike. Overtaken: the panel shipped with steppers, ran in real
+> use, and the sliders were then written directly. Three drag sliders plus an
+> owner-drawn pill button came to roughly 200 lines of Win32 — the multiplier
+> this spike existed to produce, measured on the real thing instead of a
+> stand-in.
+>
+> The finding the spike would have missed: the expensive part of a slider is not
+> drawing it, it is deciding **when to commit**. A write per mouse-move gives
+> live feedback and one undo entry per pixel of travel; a write on release gives
+> one clean undo and no preview until the finger lifts. Shipped on release, and
+> the tradeoff is written into the runbook where it can be argued with.
 
 Build **one** slider — a real one, with drag, live update, a number readout, and
 correct behaviour at the ends — on a Win32 panel, and on Cocoa if a mac session
