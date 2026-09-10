@@ -320,9 +320,45 @@ pipe transport.
 Reasoning lives in the plan under **Feature scope**. Sorted by whether a feature
 reshapes the document model, not by popularity.
 
-### Per-object physics — requested 2026-09-10, and cheaper than it looks
+### C6 — launched from After Effects, requested 2026-09-10
+
+Three requests that belong together, because each one shortens the same
+distance between "I am in AE" and "I am looking at a simulation".
+
+- [ ] **The bridge gets a Composition menu item that launches the app.**
+      `AEGP_RegisterCommandHook` and `AEGP_InsertMenuCommand` already exist in
+      the plug-in for its status command, so this is a second command that
+      spawns the release binary. Two things to decide rather than discover:
+      **where the exe is**, since the AEGP is in Program Files and the app is
+      wherever it was built — a path in the plug-in's own settings, or a
+      convention, but not a guess; and **what a second click does**, because
+      launching a second window onto the same work directory means two
+      processes writing one `bake.json`. Focus the existing window instead.
+- [ ] **A setting to autoload the scene.** Read the comp on launch rather than
+      on a button. Cheap, and it interacts with Wall K: a scene read
+      automatically is a scene the user did not ask for, so the staleness guard
+      matters more, not less. It should not auto-simulate — reading is free
+      and safe, simulating writes a bake over the last one.
+- [ ] **Show the scene in the viewport before it is simulated.** Today the
+      viewport draws from `render.json`, which only `b3_loop` produces, so
+      there is nothing to look at until a bake exists. To draw a comp as READ,
+      the geometry has to come out of the pipeline one step earlier — a render
+      model derived from the scene alone, with every layer at its resting
+      position. That is a small change to `--render-model` (it already writes
+      `rest` for pinned layers; this makes every layer have one) and a mode in
+      the app that draws a model with no bake. Worth doing: it turns the
+      viewport into a check on the READER, which currently has no visual
+      check at all, and B1's whole lesson was that a geometry bug looks like
+      nothing until you see it.
+
+### Per-object physics — requested 2026-09-10, DONE the same day
 
 Mass, friction and bounce per layer rather than one set for the whole scene.
+**Shipped**: three repeatable flags on B3 and a row of fields per layer in the
+Scene panel. Each control was measured alone against a plain baseline rather
+than asserted — mass 49.2 px, bounce 132.4 px, friction 279.3 px of endpoint
+shift — because a recorded value that changes nothing is a setting that does
+not work. The three decisions below were all taken as written:
 
 **The solver is already per-body.** `sim.PolyBody` carries `density`,
 `friction` and `elasticity` on every spec, and `sim` reads them per shape when
