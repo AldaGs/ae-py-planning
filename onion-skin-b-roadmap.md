@@ -207,7 +207,29 @@ UI — still a real improvement over A, still shippable, and known within a week
 
 ---
 
-## Phase 1 — POC: the effect alone
+## Phase 1 — POC: the effect alone — **DONE, v1.4, 2026-09-09**
+
+> Shipped as `Template/OnionSkin/fx/`. NumPy proto first
+> (`python-proto/onion_skin/`), seven checks with two controls, then the port.
+>
+> Four defects found by running it, each named by a measurement rather than a
+> guess:
+> 1. `for (...; !err && ...)` made a failed checkout past the end of the timeline
+>    skip every remaining skin *and* the final composite — ghosting stopped dead
+>    instead of thinning. **Absence of a frame is not an error condition.**
+> 2. **`PF_OutFlag_WIDE_TIME_INPUT` was missing.** AE cached the output as if it
+>    depended only on the current frame; ghosts went stale until a manual purge.
+> 3. **Layer params arrive empty.** `params[i]->u.ld.data` is always NULL before
+>    render — `PF_CHECKOUT_PARAM` is the only read *and* the only way to test
+>    whether one is set. See [[ae-layer-params-need-checkout]].
+> 4. A checked-out layer param carries **none of its comp transform**, so it
+>    ghosted artwork but not animated position.
+>
+> **Source Layer params retired in v1.4.** The alpha constraint is documented
+> (`fx/USAGE.md`) rather than engineered around: the adjustment-layer placement
+> ghosts every kind of animation including transforms, and that is what character
+> work needs. Disk IDs kept reserved and invisible — deleting them would renumber
+> everything after them.
 
 No panel. Effect on a manually created adjustment layer.
 
