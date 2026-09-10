@@ -211,6 +211,21 @@ pipe transport.
         or with `APPDATA` unset. `solver.rs` does not touch the child
         environment. Fixed with a venv at `.venv-physics` pinned as
         `paths.python`, which is the case `settings.rs` already anticipated.
+- [~] **Wall I, spent.** C0.3's native keyframing is **wired into the product**
+      (2026-09-10): `apply_bake` in the AEGP, an Apply button in the shell, and
+      Wall K checked in the backend before the bridge is touched so a front end
+      cannot bypass it. `b2_apply_bake.jsx` stays as the reference
+      implementation — every native number is a comparison against it, and one
+      you can no longer run is one you can no longer check.
+      The O(n^2) auto-bezier pass is **skipped**, per C0.3. But C0.3 measured
+      that it was safe to skip and *assumed why*, and the product now depends on
+      it — so the apply reads the flag back on a spread of keys and reports the
+      count. If AE stops behaving the way C0.3 measured, the window says so
+      rather than bowing every motion path invisibly.
+      **Built and unit-tested, NOT yet run in AE.** The `.aex` needs an
+      elevated copy into the Plug-ins folder, and the numbers above are C0.3's,
+      not this code's. Nothing here is verified until an apply runs from the
+      window and the reported us/key is read off a real comp.
 - [ ] **C2.** The viewport: `preview.py`'s renderer becomes the canvas, scrubbing
       the bake before it is applied. A5's argument becomes the main surface.
 - [~] **C3.** Staleness (Wall K) survives the GUI — re-read and compare, never
