@@ -42,16 +42,19 @@ gate is green, the protocol choice turned out to be free, and Wall I's cost is
 gone. Evidence in `ae_physics_simulator/SPIKES.md`, which also records what each
 result does *not* cover.
 
-**C1 has started.** **C1.0 — the schema — is done** (2026-09-09):
-`ae-physics-scene/2` and `ae-physics-bake/3` carry all seven Tier 0 slots,
-21/21 checks in `c1_schema.py`. **C1.1 — the shell — is built** the same day:
-a Tauri window in `ae_physics_simulator/app` that pings the bridge, reads the
-comp, lists the layers, and runs B3 as a subprocess.
+**C1 IS COMPLETE** (2026-09-10). The whole loop now runs from a window
+outside After Effects: read the comp over the C0.1 bridge, simulate, apply.
+**AE holds the solver to 0.000057 px/deg with straight-line tweens** on a real
+four-layer comp — C1.0's schema gate and C1.1's shell gate both closed in one
+sitting, and the details, including the two things that sitting did NOT close,
+are under C1.2 below.
 
-**Both owe the same sitting**, and it is the next thing to do: open a comp with
-shape layers in AE and read it through the shell. No comp has yet produced a
-`/2` document — every one in existence came from the upgrade path — and the
-scene list has never rendered a real comp.
+Wall K's guard was then measured rather than argued: a nudged Position applies
+anyway, because the bake's `source` block describes the scene and the apply
+script can only see the comp. The shell now re-reads and compares hashes (C3,
+built and unit-tested, not yet exercised live).
+
+**The next step is C2, the viewport.**
 
 | Step | What it settled | Checks |
 |---|---|---|
@@ -179,13 +182,67 @@ pipe transport.
         and the refusal path — not the layer list, the pinning, or a simulate
         run. That and C1.0's `/2`-from-AE gate are the same sitting: open a
         comp with shape layers and read it.
-  - [ ] **C1.2 — the sitting that closes both gates.** Read a real comp through
-        the shell: first `/2` document ever produced by AE, first layer list,
-        first simulate from the window.
+  - [x] **C1.2 — the sitting that closes both gates. DONE** (2026-09-10).
+        Comp 1, 1920x1080 @24, four layers — three dynamic, FLOOR pinned, seven
+        convex parts — went AE → shell → solver → AE. Both gates are closed:
+        the first `ae-physics-scene/2` ever produced by After Effects rather
+        than by `upgrade()`, and the first layer list, pinning and simulate run
+        from the window.
+        Verified against the bake and an in-AE readback (`ae-physics-report/1`):
+        **AE holds the solver to 0.000057** over 45 sampled keys, and the tween
+        midpoints sit **0.0034 px/deg** off the straight line — B2's
+        `makeLinear()` really does defeat spatial auto-bezier on a real comp,
+        which is the failure A5 says is invisible on every still. FLOOR got
+        `pos_keys=0 rot_keys=0`. The duplicate-name trap fired and was survived:
+        ids 1 and 3 are both "Shape Layer 1" and end in different places.
+        Apply cost 5,412 ms, **~826 us/key** interpolation — B2's 853 confirmed
+        in the wild, and still the ExtendScript path: **C0.3's 88.5 us/key
+        native keyframing is measured but NOT wired into the product.** Spatial
+        tangent arity 3 against a 2-element value, as B2 found.
+        **Two things that sitting did not close.** It ran at **ppm 200, not
+        B3's 100**, so "the shell reproduces a hand run byte-for-byte" is still
+        untested. And layer 3 reaches **199.7°** — AE stored it unwrapped, so
+        Wall F did not bite, but the crossing is between frames 69 and 70 and
+        `sample_stride=17` sampled tweens at 68.5 and 85.5. The one interval A5
+        says the damage hides in is the one interval nobody looked at.
+        **It also needed a pinned interpreter.** `pymunk` was installed only in
+        the per-user site-packages, which resolves from a shell and not from the
+        Tauri app — same `python.exe`, different answer, reproducible with `-s`
+        or with `APPDATA` unset. `solver.rs` does not touch the child
+        environment. Fixed with a venv at `.venv-physics` pinned as
+        `paths.python`, which is the case `settings.rs` already anticipated.
 - [ ] **C2.** The viewport: `preview.py`'s renderer becomes the canvas, scrubbing
       the bake before it is applied. A5's argument becomes the main surface.
-- [ ] **C3.** Staleness (Wall K) survives the GUI — re-read and compare, never
-      trust the `source` block.
+- [~] **C3.** Staleness (Wall K) survives the GUI — re-read and compare, never
+      trust the `source` block. **The guard is built and unit-tested
+      (2026-09-10); it has not yet refused a stale bake in a live sitting.**
+      **Wall K's gap was measured, not argued.** Nudge a layer's Position after
+      simulating and `b2_apply_bake.jsx` applies the bake anyway, overwriting
+      the nudge from keyframe 0. Its four checks are comp name, comp
+      dimensions, layer id in range, and layer name at that id — and its own
+      comment says why: *"Comp identity is the half AE can check."*
+      The reason is structural rather than an oversight. The bake's `source`
+      block describes **the scene**; the apply script can only see **the comp**;
+      names and dimensions are the entire overlap. Every geometric field —
+      position, rotation, scale, anchor, paths — lives in the scene and is
+      invisible from inside AE. `scene_sha256` *is* compared, at
+      `b3_loop.py:97`, but against a scene file on disk, and AE has no scene
+      file. The hash is not ignored there; it is unreachable.
+      **What closes it:** the shell re-reads the comp through the bridge,
+      hashes the bytes, and compares them to `source.scene_sha256`. Sound only
+      because the scene document is deterministic — it carries no timestamp
+      (`made_at` is on the BAKE) — so the same comp hashes the same twice. If a
+      nondeterministic field is ever added to `ae-physics-scene`, this guard
+      becomes a permanent false alarm, and a guard that always fires is a guard
+      nobody reads.
+      It **reports rather than blocks**, deliberately unlike the solver's
+      escape guard: re-reading after moving a layer you did not simulate is
+      legitimate, and the honest sentence is "this was computed from different
+      geometry", not "you may not". Five tests, and the load-bearing one asserts
+      the identity checks stay **empty** on a nudged Position — so it cannot
+      pass for the wrong reason and keeps proving the hash is what catches it.
+      Still owed: it has only been exercised offline. The live sitting is to
+      nudge a layer and watch the window say so.
 - [ ] **C4.** Revisit A4's sliver risk against whatever solver C ends up running.
 - [ ] **C5.** One layer becomes N: the output capability behind both Wall J's
       island split and pre-fracture.

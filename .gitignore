@@ -1,3 +1,7 @@
 .claude*
 __pycache__/
 *.pyc
+
+# Solver dependencies for the physics sim: pymunk lived only in the per-user
+# site-packages, which the Tauri shell does not resolve. paths.python pins this.
+.venv-physics/
