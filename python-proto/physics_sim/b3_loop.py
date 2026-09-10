@@ -47,6 +47,7 @@ import os
 import sys
 import time
 
+import geom
 import preview
 import scene_io
 from sim import bake as bake_scene
@@ -63,7 +64,8 @@ def digest(path: str) -> str:
         return hashlib.sha256(fh.read()).hexdigest()
 
 
-def source_block(scene_path: str, doc: dict, meta: dict, args) -> dict:
+def source_block(scene_path: str, doc: dict, meta: dict, args,
+                 overrides: dict) -> dict:
     """Everything needed to tell whether this bake still belongs to that comp."""
     return {
         "scene_file": os.path.basename(scene_path),
@@ -81,6 +83,10 @@ def source_block(scene_path: str, doc: dict, meta: dict, args) -> dict:
             "friction": args.friction,
             "elasticity": args.elasticity,
             "static": list(args.static),
+            # Wall K: the source block is what tells you whether a bake still
+            # means anything, and a run with per-layer physics that only
+            # records the scene-wide numbers is a partial description of it.
+            "layer_overrides": overrides,
             "enclose": not args.no_walls,
         },
         "made_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -150,6 +156,106 @@ def apply_settings(scene, meta, args):
     return pinned, unmatched
 
 
+def parse_overrides(pairs, what):
+    """`ID=VALUE` pairs off the command line, into {key: float}.
+
+    Reported rather than silently dropped: a per-layer value that does not
+    parse is a layer that quietly ran with the scene default, and the whole
+    point of these flags is that a particular layer is different.
+    """
+    out = {}
+    for raw in pairs or ():
+        key, sep, val = raw.partition("=")
+        if not sep:
+            raise SystemExit(f"--layer-{what} wants ID=VALUE, got {raw!r}")
+        try:
+            out[key.strip()] = float(val)
+        except ValueError:
+            raise SystemExit(f"--layer-{what} {raw!r}: {val!r} is not a number")
+    return out
+
+
+def resolve_layer(key, scene, meta):
+    """A layer id, or a name that belongs to exactly one layer.
+
+    Ids first, and an ambiguous NAME is refused rather than applied to every
+    layer that shares it. AE allows duplicate layer names -- "Shape Layer 1"
+    twice is its own default -- and that ambiguity has now caused the same
+    class of bug three times: Phase A dropped a layer by keying the bake on
+    name, and the shell's pin control pinned both halves of a matching pair.
+    `--static` still accepts a name for both, which is a compatibility wart;
+    these flags do not repeat it.
+    """
+    for i, m in enumerate(meta["layers"]):
+        if key == str(m["id"]):
+            return i
+    hits = [i for i, m in enumerate(meta["layers"])
+            if m["name"].lower() == key.lower()]
+    if len(hits) == 1:
+        return hits[0]
+    if len(hits) > 1:
+        ids = ", ".join(str(meta["layers"][i]["id"]) for i in hits)
+        raise SystemExit(
+            f"'{key}' names {len(hits)} layers (ids {ids}) -- say which one by "
+            f"id. A name is not an identity in AE.")
+    return None
+
+
+def apply_per_layer(scene, meta, args):
+    """Per-layer mass, friction and bounce, over the scene-wide defaults.
+
+    THE SOLVER WAS ALREADY PER-BODY. `sim.PolyBody` has carried `density`,
+    `friction` and `elasticity` on every spec from A3 onwards, and `sim` reads
+    them per shape. What made the scene uniform was the loop below stamping
+    `args.friction` over all of them. So this is not a physics change; it is
+    letting values that already exist differ.
+
+    MASS IS NOT A FIELD, AND THIS IS WHERE IT BECOMES ONE.
+
+    The solver takes DENSITY, and mass = density * area. A mass control that
+    just set density would make two layers of different size behave nothing
+    alike at the same number, which is not what anyone means by "mass". The
+    back-solve needs the area, and the area is geometry -- so it happens here,
+    in the half of the program that owns geometry, rather than in a UI that
+    would have to reimplement `compound_mass_properties` to guess at it.
+
+        area_m2 = compound_mass_properties(parts_px, 1.0) / ppm**2
+        density = mass_kg / area_m2
+
+    Mass at density 1.0 IS the area, which is why the first call reads oddly
+    and is correct.
+    """
+    mass = parse_overrides(args.layer_mass, "mass")
+    fric = parse_overrides(args.layer_friction, "friction")
+    bounce = parse_overrides(args.layer_bounce, "bounce")
+
+    recorded, unmatched = {}, []
+    for what, table in (("mass", mass), ("friction", fric), ("bounce", bounce)):
+        for key, value in table.items():
+            i = resolve_layer(key, scene, meta)
+            if i is None:
+                unmatched.append(f"--layer-{what} {key}")
+                continue
+            body = scene.bodies[i]
+            lid = str(meta["layers"][i]["id"])
+            slot = recorded.setdefault(lid, {})
+
+            if what == "friction":
+                body.friction = value
+            elif what == "bounce":
+                body.elasticity = value
+            else:
+                area_m2 = geom.compound_mass_properties(body.parts, 1.0)[0]
+                area_m2 /= args.ppm ** 2
+                if area_m2 <= 0.0:
+                    raise SystemExit(
+                        f"layer {lid} has no area, so it has no mass to set")
+                body.density = value / area_m2
+                slot["density"] = body.density
+            slot[what] = value
+    return recorded, unmatched
+
+
 def enclose(scene):
     w, h = float(scene.width), float(scene.height)
     scene.statics = [((0.0, h - 1.0), (w, h - 1.0)),
@@ -187,8 +293,11 @@ def run(args) -> int:
         print(f"   warning: {w}")
 
     pinned, unmatched = apply_settings(scene, meta, args)
+    # AFTER the scene-wide stamp above, which would otherwise overwrite it.
+    overrides, bad_overrides = apply_per_layer(scene, meta, args)
+    unmatched = list(unmatched) + bad_overrides
     if unmatched:
-        print(f"   ERROR: --static matched nothing for {unmatched}. "
+        print(f"   ERROR: matched no layer: {unmatched}. "
               f"Layers are: "
               f"{[f'{m['id']}:{m['name']}' for m in meta['layers']]}",
               file=sys.stderr)
@@ -202,7 +311,7 @@ def run(args) -> int:
     # it was meant to land rather than the applier assuming.
     bake = bake_scene(scene, ids, meta["output"])
     elapsed = time.time() - t0
-    bake["source"] = source_block(args.scene, doc, meta, args)
+    bake["source"] = source_block(args.scene, doc, meta, args, overrides)
 
     dyn = [m for m in meta["layers"] if not m.get("static")]
     keys = sum(len(l["keyframes"]["position"]) + len(l["keyframes"]["rotation"])
@@ -360,6 +469,14 @@ def parser():
     p.add_argument("scene", help="scene JSON from b1_read_shapes.jsx")
     p.add_argument("--out", default="b3_bake.json")
     p.add_argument("--preview", default="b3_preview.png")
+    p.add_argument("--layer-mass", action="append", metavar="ID=KG",
+                   help="mass for one layer, back-solved into density by its "
+                        "own area; repeatable")
+    p.add_argument("--layer-friction", action="append", metavar="ID=V",
+                   help="friction for one layer, over --friction; repeatable")
+    p.add_argument("--layer-bounce", action="append", metavar="ID=V",
+                   help="elasticity for one layer, over --elasticity; "
+                        "repeatable")
     p.add_argument("--render-model", default=None,
                    help="also write the viewport's geometry (polygons in "
                         "layer space plus anchors) as ae-physics-render/1")
