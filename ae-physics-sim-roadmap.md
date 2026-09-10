@@ -42,21 +42,26 @@ gate is green, the protocol choice turned out to be free, and Wall I's cost is
 gone. Evidence in `ae_physics_simulator/SPIKES.md`, which also records what each
 result does *not* cover.
 
-**C1 IS COMPLETE** (2026-09-10). The whole loop now runs from a window
-outside After Effects: read the comp over the C0.1 bridge, simulate, apply.
-**AE holds the solver to 0.000057 px/deg with straight-line tweens** on a real
-four-layer comp — C1.0's schema gate and C1.1's shell gate both closed in one
-sitting, and the details, including the two things that sitting did NOT close,
-are under C1.2 below.
+**C1 AND C2 ARE COMPLETE** (2026-09-10). The whole loop runs from a window
+outside After Effects: read the comp over the C0.1 bridge, simulate, scrub it,
+apply. **AE holds the solver to 0.000057 px/deg with straight-line tweens** on a
+real four-layer comp, and the apply is native at **131.0 µs/key — 28.6× the
+ExtendScript path it replaced**.
 
-Wall K's guard was then measured rather than argued: a nudged Position applies
-anyway, because the bake's `source` block describes the scene and the apply
-script can only see the comp. The shell now re-reads and compares hashes (C3,
-built and unit-tested, not yet exercised live).
+**Wall I is spent and Wall K is guarded.** Wall K's gap was measured rather than
+argued (a nudged Position applied anyway, because the bake's `source` block
+describes the scene and the apply script can only see the comp), and the guard
+now re-reads and compares hashes — confirmed live, refusing a stale bake and
+letting the override through.
 
-**C1 is closed, Wall I is spent and Wall K is guarded.** The apply runs natively at **131.0 us/key, 28.6x faster than the ExtendScript path it replaced**, verified on a real comp against a Release build.
+**C6 is two-thirds done**: a Composition menu item that launches the app, a
+setting to read the comp on launch, and a hand-off that brings AE forward after
+an apply. **C6.3 — drawing the scene before it is simulated — is the one still
+open**, and it is the one with a real payoff: it would give the READER a visual
+check, which it has never had.
 
-**The next step is C2, the viewport.**
+**Open and waiting on a decision: C7, saving a sim with the project.** The
+question is not technical — see the plan.
 
 | Step | What it settled | Checks |
 |---|---|---|
@@ -136,7 +141,7 @@ pipe transport.
 
 ### Then C1–C5 — the application
 
-- [ ] **C1.** ▶ **in progress.**
+- [x] **C1. COMPLETE** (2026-09-10).
   - [x] **C1.0 — the schema. DONE** (2026-09-09). `ae-physics-scene/2` and
         `ae-physics-bake/3` carry every Tier 0 slot, arrays empty and scalars
         at their defaults. 21/21 checks in `python-proto/physics_sim/c1_schema.py`.
@@ -271,38 +276,25 @@ pipe transport.
       **34,111 bytes each and differ only in `made_at`** (01:48:08 vs
       01:52:17). B3's claim that the middle of the loop is ONE COMMAND survives
       the GUI.
-- [ ] **C2.** The viewport: `preview.py`'s renderer becomes the canvas, scrubbing
-      the bake before it is applied. A5's argument becomes the main surface.
-- [~] **C3.** Staleness (Wall K) survives the GUI — re-read and compare, never
-      trust the `source` block. **The guard is built and unit-tested
-      (2026-09-10); it has not yet refused a stale bake in a live sitting.**
-      **Wall K's gap was measured, not argued.** Nudge a layer's Position after
-      simulating and `b2_apply_bake.jsx` applies the bake anyway, overwriting
-      the nudge from keyframe 0. Its four checks are comp name, comp
-      dimensions, layer id in range, and layer name at that id — and its own
-      comment says why: *"Comp identity is the half AE can check."*
-      The reason is structural rather than an oversight. The bake's `source`
-      block describes **the scene**; the apply script can only see **the comp**;
-      names and dimensions are the entire overlap. Every geometric field —
-      position, rotation, scale, anchor, paths — lives in the scene and is
-      invisible from inside AE. `scene_sha256` *is* compared, at
-      `b3_loop.py:97`, but against a scene file on disk, and AE has no scene
-      file. The hash is not ignored there; it is unreachable.
-      **What closes it:** the shell re-reads the comp through the bridge,
-      hashes the bytes, and compares them to `source.scene_sha256`. Sound only
-      because the scene document is deterministic — it carries no timestamp
-      (`made_at` is on the BAKE) — so the same comp hashes the same twice. If a
-      nondeterministic field is ever added to `ae-physics-scene`, this guard
-      becomes a permanent false alarm, and a guard that always fires is a guard
-      nobody reads.
-      It **reports rather than blocks**, deliberately unlike the solver's
-      escape guard: re-reading after moving a layer you did not simulate is
-      legitimate, and the honest sentence is "this was computed from different
-      geometry", not "you may not". Five tests, and the load-bearing one asserts
-      the identity checks stay **empty** on a nudged Position — so it cannot
-      pass for the wrong reason and keeps proving the hash is what catches it.
-      Still owed: it has only been exercised offline. The live sitting is to
-      nudge a layer and watch the window say so.
+- [x] **C2. The viewport. DONE** (2026-09-10). `preview.py`'s renderer became
+      a canvas in the shell, and A5's argument is now the main surface.
+      **The scrubber is continuous** — twentieths of a frame, with quarter-frame
+      steps — because a per-frame scrubber can only show the values we already
+      know are correct. C1.2 demonstrated the need: a layer crossed 180° between
+      frames 69 and 70 and the sampler stepped over it.
+      The split that decided its shape: **geometry stays in Python** (bezier
+      flattening, group transforms, layer scale, convex decomposition — the
+      ~1,200 lines A3 and A4 verified) and **the app owns only the transform**,
+      `position + R(θ)·(v − anchor)` plus linear sampling. `b3_loop.py
+      --render-model` writes `ae-physics-render/1`; Rust parses neither document.
+      `c2_render_model.py`, **15/15**, checks that transform against
+      `preview.py` at FRACTIONAL frames. Two things the controls found are
+      recorded under C2.0 in the plan: the first control was itself broken
+      (it perturbed a shared input, which cannot move a comparison of two
+      functions OF that input), and the anchor term is **never exercised by
+      real data** because every dynamic anchor sits at [0, 0].
+      **Not covered:** that the canvas draws what the numbers say. A correct
+      polygon list and a wrong fill rule are identical to an offline check.
 - [ ] **C4.** Revisit A4's sliver risk against whatever solver C ends up running.
 - [ ] **C5.** One layer becomes N: the output capability behind both Wall J's
       island split and pre-fracture.
@@ -322,24 +314,42 @@ reshapes the document model, not by popularity.
 
 ### C6 — launched from After Effects, requested 2026-09-10
 
-Three requests that belong together, because each one shortens the same
-distance between "I am in AE" and "I am looking at a simulation".
+Requests that belong together, because each shortens the same distance between
+"I am in AE" and "I am looking at a simulation". **Two of three done, plus the
+hand-off.**
 
-- [ ] **The bridge gets a Composition menu item that launches the app.**
-      `AEGP_RegisterCommandHook` and `AEGP_InsertMenuCommand` already exist in
-      the plug-in for its status command, so this is a second command that
-      spawns the release binary. Two things to decide rather than discover:
-      **where the exe is**, since the AEGP is in Program Files and the app is
-      wherever it was built — a path in the plug-in's own settings, or a
-      convention, but not a guess; and **what a second click does**, because
-      launching a second window onto the same work directory means two
-      processes writing one `bake.json`. Focus the existing window instead.
-- [ ] **A setting to autoload the scene.** Read the comp on launch rather than
-      on a button. Cheap, and it interacts with Wall K: a scene read
-      automatically is a scene the user did not ask for, so the staleness guard
-      matters more, not less. It should not auto-simulate — reading is free
-      and safe, simulating writes a bake over the last one.
-- [ ] **Show the scene in the viewport before it is simulated.** Today the
+- [x] **The hand-off after an apply. DONE** (2026-09-10). A clean apply asks AE
+      to come forward and then gets out of the way — minimise by default, close
+      or stay on request. Minimise rather than close because closing throws away
+      the viewport, the layer list and the parameters that produced the bake.
+      **The order is not arbitrary and the result is not promised.**
+      `SetForegroundWindow` is advisory and Windows refuses it from a process
+      that is neither foreground nor recently in receipt of input, which is the
+      plug-in's exact situation. So AE is asked to raise itself FIRST, while the
+      app still holds the foreground to give away, and the app minimises SECOND
+      — the minimise is what reliably reveals AE, the request is what lifts it
+      above whatever else is open. A refusal is reported as a fact, not an error.
+      Only on a clean apply: a warning is something to READ, and hiding the
+      window showing it would be perverse.
+
+- [x] **Composition → Physics Simulator. DONE** (2026-09-10).
+      Under Composition rather than Window, because it opens a tool that acts
+      on the comp you are in — where AE puts Pre-compose and Comp Settings. The
+      status item stays under Window, where a diagnostic belongs.
+      **Both open questions were answered rather than guessed.** *Where the exe
+      is*: the APP registers itself, sending its own path on every launch, kept
+      in AE's preferences. The AEGP is in Program Files and the app is wherever
+      it was built, so anything derived would be a guess — and a wrong guess is
+      a menu item that silently does nothing, which is worse than none. The
+      honest consequence: it works after the app has been opened by hand once,
+      and says exactly that until then. *A second click*: a live bridge client
+      means it is already open, and it says so rather than putting two processes
+      on one work directory both writing one `bake.json`.
+- [x] **Read the comp on launch. DONE** (2026-09-10), off by default.
+      It deliberately does **not** auto-simulate: reading is free and safe,
+      while simulating writes a bake over the last one, and doing that to
+      somebody on launch is a way to lose work they had not applied yet.
+- [ ] **C6.3 — show the scene in the viewport before it is simulated.** ▶ **the one still open.** Today the
       viewport draws from `render.json`, which only `b3_loop` produces, so
       there is nothing to look at until a bake exists. To draw a comp as READ,
       the geometry has to come out of the pipeline one step earlier — a render
@@ -350,6 +360,35 @@ distance between "I am in AE" and "I am looking at a simulation".
       viewport into a check on the READER, which currently has no visual
       check at all, and B1's whole lesson was that a geometry bug looks like
       nothing until you see it.
+
+### C7 — a sim that belongs to a comp, asked 2026-09-10
+
+Today every pin and per-layer value lives in one global settings file, keyed by
+**layer id**. Two failures follow, and neither is hypothetical:
+
+- **Switch comps and the ids collide.** Layer 3 in one comp and layer 3 in
+  another are different layers and the app cannot tell, so pins and masses
+  transfer silently onto the wrong shapes.
+- **Nothing travels.** Open the `.aep` somewhere else and the setup is gone.
+
+**The decision this waits on is not technical.** Is a sim part of the ARTWORK or
+part of the WORKING STATE? If two people opening the same project should get the
+same simulation, it has to live inside the project and a sidecar is not enough.
+If it is closer to a render-queue setting, a sidecar is simpler and losing it is
+survivable. The options only sort themselves once that is answered:
+
+1. **Inside the AE project.** The SDK has no arbitrary per-project blob store.
+   What exists is `comp.comment`, layer comments, markers, or an effect with arb
+   data on a null — all size-limited, all user-visible and user-deletable. But
+   data stored this way genuinely travels, Collect Files included.
+2. **A sidecar beside the `.aep`.** Readable, diffable, version-controllable, no
+   size limit, and the natural home for something that is already JSON. A
+   careless copy separates it from the project and Collect Files ignores it.
+3. **Both**, with a key in the project so the sidecar can be matched to it.
+
+Whichever wins needs the same identity: **project path + comp id + the scene
+hash Wall K already computes**, so opening the wrong comp reports a mismatch
+instead of quietly applying somebody else's masses.
 
 ### Per-object physics — requested 2026-09-10, DONE the same day
 

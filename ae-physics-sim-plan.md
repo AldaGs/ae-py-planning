@@ -476,6 +476,32 @@ nothing else.
   existing convex parts by Sutherland-Hodgman -- because fracture is scene
   authoring, not solving, and the sandbox is still where things can be measured.
 
+### Where a sim lives — OPEN, and the question is not technical
+
+Raised 2026-09-10. Today every pin and per-layer value sits in one global
+settings file keyed by layer id, so switching comps transfers them onto whatever
+happens to be layer 3 over there, and nothing travels with the project at all.
+
+**The decision this waits on: is a sim part of the ARTWORK, or part of the
+WORKING STATE?** If two people opening the same `.aep` should get the same
+simulation, it has to live inside the project and a sidecar file is not enough.
+If it is closer to a render-queue setting, a sidecar is simpler and better in
+every other respect, and losing it is survivable. None of the options sort
+themselves until that is answered, which is why this sits in the plan rather
+than the roadmap.
+
+The AE SDK has **no arbitrary per-project blob store**. Storing inside the
+project means `comp.comment`, layer comments, markers, or arbitrary data on
+an effect — all size-limited, all user-visible and user-deletable, and all
+genuinely travelling with the file, Collect Files included. A sidecar beside the
+`.aep` is readable, diffable, unlimited, and the natural home for something
+that is already JSON — and a careless copy separates it from the project.
+
+Either way the identity is the same, and it already exists: **project path +
+comp id + the scene hash Wall K computes.** Without it, opening the wrong comp
+applies somebody else's masses silently — which is Wall K wearing a different
+hat, and Wall K's lesson was that only a re-read catches it.
+
 ## Phase D — The AEGP renders
 
 **Narrowed by Phase C's decision.** The AEGP itself now arrives in C0 as the
