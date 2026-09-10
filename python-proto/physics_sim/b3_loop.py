@@ -305,6 +305,42 @@ def run(args) -> int:
     if not args.no_walls:
         enclose(scene)
 
+    if args.render_only:
+        """C6.3 -- the scene BEFORE it is simulated.
+
+        Everything above this line is scene loading, the pin list, the
+        per-layer overrides and the wall box. Nothing below it is: the sim
+        starts at `bake_scene`. So a render model written here is the same
+        geometry the solver is about to be handed, produced by the same code
+        with the same arguments, which is what makes it worth looking at.
+
+        The point is not convenience. The READER has never had a visual
+        check. B1 found A3's layer-space assumption to be false in AE only
+        because a bake came out wrong; a comp whose polygons are misplaced
+        before any physics runs currently looks exactly like a comp whose
+        physics is wrong, and the two have completely different causes. This
+        separates them: if it looks wrong here, the sim is innocent.
+
+        `--render-only` and `--render-model` are separate flags rather than
+        one, because "write the model" and "do not simulate" are separate
+        decisions and the normal run does the first without the second.
+        """
+        if not args.render_model:
+            print("--render-only needs --render-model PATH: it writes the "
+                  "geometry and nothing else, so there is nowhere to put it.",
+                  file=sys.stderr)
+            return 2
+        n = write_render_model(args.render_model, scene, meta)
+        print(f"\n   {doc['comp'].get('name', '?')} "
+              f"{scene.width}x{scene.height} @ {scene.fps}fps, "
+              f"{scene.duration_frames} frames")
+        print(f"   {len(scene.bodies)} layers, "
+              f"{sum(m['parts'] for m in meta['layers'])} convex parts"
+              + (f", pinned {', '.join(pinned)}" if pinned else ""))
+        print(f"   wrote {args.render_model} ({n / 1024:.0f} KB) -- "
+              f"geometry at rest, NOT simulated")
+        return 0
+
     ids = [m["id"] for m in meta["layers"]]
     t0 = time.time()
     # The bake target rides along from the scene, so the document says where
@@ -343,7 +379,7 @@ def run(args) -> int:
     print(f"   wrote {args.out} ({len(text) / 1024:.0f} KB)")
 
     if args.render_model:
-        n = write_render_model(args.render_model, scene, meta, bake)
+        n = write_render_model(args.render_model, scene, meta)
         print(f"   wrote {args.render_model} ({n / 1024:.0f} KB) -- "
               f"the viewport's geometry")
 
@@ -375,7 +411,7 @@ def run(args) -> int:
 RENDER_SCHEMA = "ae-physics-render/1"
 
 
-def write_render_model(path, scene, meta, bake):
+def write_render_model(path, scene, meta):
     """The polygons a viewport needs, and nothing it can compute itself.
 
     C2 puts a canvas in the shell, and the question that decides its shape is
@@ -410,7 +446,6 @@ def write_render_model(path, scene, meta, bake):
     something the front end has to know to invent.
     """
     idx = {m["id"]: b for m, b in zip(meta["layers"], scene.bodies)}
-    statics = {lay["id"]: lay["static"] for lay in bake["layers"]}
 
     model = {
         "schema": RENDER_SCHEMA,
@@ -433,7 +468,7 @@ def write_render_model(path, scene, meta, bake):
             "name": m["name"],
             "anchor": list(b.anchor),
             "parts": [[list(v) for v in part] for part in b.parts],
-            "static": bool(statics.get(m["id"], False)),
+            "static": bool(b.static),
             "rest": {"position": list(b.position), "rotation": b.angle_deg},
         })
 
@@ -480,6 +515,10 @@ def parser():
     p.add_argument("--render-model", default=None,
                    help="also write the viewport's geometry (polygons in "
                         "layer space plus anchors) as ae-physics-render/1")
+    p.add_argument("--render-only", action="store_true",
+                   help="write the render model from the scene and STOP -- "
+                        "no simulation, every layer at its resting pose. "
+                        "Needs --render-model.")
     p.add_argument("--gravity", type=float, default=9.8,
                    help="m/s^2, positive is down (default 9.8)")
     p.add_argument("--ppm", type=float, default=100.0,

@@ -388,8 +388,76 @@ def test_deterministic(scene_path):
           f"{len(a)} bytes each" if a == b else "they differ")
 
 
+
+# --------------------------------------------------------------------------
+# 6 -- C6.3: the scene BEFORE it is simulated
+# --------------------------------------------------------------------------
+
+def render_only(scene_path, out_dir, extra=()):
+    """`--render-only`: the same command, stopped before the sim starts."""
+    model = os.path.join(out_dir, "pre.json")
+    cmd = [sys.executable, os.path.join(HERE, "b3_loop.py"), scene_path,
+           "--render-only", "--render-model", model,
+           "--gravity", "9.8", "--ppm", "100", "--substeps", "8",
+           "--frames", "60", "--static", "FLOOR", *extra]
+    p = subprocess.run(cmd, capture_output=True, text=True, cwd=HERE)
+    if p.returncode != 0:
+        raise SystemExit(f"--render-only failed ({p.returncode}):\n{p.stderr}")
+    return load(model)
+
+
+def test_pre_sim(scene_path, model):
+    """The pre-sim drawing is only worth trusting if it is the SAME geometry.
+
+    C6.3 exists so the reader can be checked by eye: if the polygons are
+    misplaced before any physics runs, the sim is innocent, and B1 spent a
+    whole sitting on exactly that confusion when A3's layer-space assumption
+    turned out to be false in AE.
+
+    That argument collapses if `--render-only` takes a different path through
+    the geometry. It does not -- everything above the early exit is scene
+    loading, pins, per-layer overrides and the wall box, and the sim starts
+    after it -- but "does not" is the kind of claim this project has been
+    wrong about before, so it is measured rather than asserted.
+    """
+    print("\n6. --render-only writes the same geometry the solver is handed")
+
+    with tempfile.TemporaryDirectory() as d:
+        pre = render_only(scene_path, d)
+
+    a = json.dumps(pre, sort_keys=True)
+    b = json.dumps(model, sort_keys=True)
+    check("pre-sim model is byte-identical to the post-sim one", a == b,
+          f"{len(a)} bytes each" if a == b else "they differ")
+
+    # THE CONTROL. The check above is a comparison of two things produced from
+    # one scene, and a comparison like that passes just as happily when the
+    # thing being compared is constant -- which is precisely the trap
+    # section 4 fell into TWICE. So: change the scene, and the two must part.
+    #
+    # A pin is the right perturbation because it is the one input that reaches
+    # the render model without going near the solver: it lands in `static`,
+    # which decides the fill colour of every polygon the layer draws. If a pin
+    # did NOT move this number, the pre-sim drawing would be showing a world
+    # with no floor in it.
+    with tempfile.TemporaryDirectory() as d:
+        unpinned = render_only(scene_path, d, extra=("--no-walls",))
+    moved = json.dumps(unpinned, sort_keys=True) != b
+    check("control: dropping the walls changes it", moved,
+          "the two models differ, so the comparison has teeth"
+          if moved else "IDENTICAL -- section 6 proves nothing")
+
+    # And the resting pose is the whole point: with no bake, every layer draws
+    # at `rest`, so a model whose rest poses were empty would draw a blank
+    # comp and still pass everything above.
+    posed = [L for L in pre["layers"]
+             if L["rest"]["position"] != [0.0, 0.0]]
+    check("every layer has a resting pose to draw at",
+          len(posed) == len(pre["layers"]),
+          f"{len(posed)}/{len(pre['layers'])} layers sit somewhere real")
+
 def main():
-    print("C2.0 -- ae-physics-render/1 and the viewport's transform")
+    print("C2.0 -- ae-physics-render/1, the viewport's transform, and C6.3")
     print("=" * 74)
 
     if not os.path.exists(SCENE):
@@ -407,6 +475,7 @@ def main():
     test_agreement(model, bake)
     test_broken_control(model, bake)
     test_deterministic(SCENE)
+    test_pre_sim(SCENE, model)
 
     print("\n" + "=" * 74)
     bad = [n for n, ok, _ in results if not ok]

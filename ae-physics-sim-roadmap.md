@@ -54,11 +54,11 @@ describes the scene and the apply script can only see the comp), and the guard
 now re-reads and compares hashes — confirmed live, refusing a stale bake and
 letting the override through.
 
-**C6 is two-thirds done**: a Composition menu item that launches the app, a
-setting to read the comp on launch, and a hand-off that brings AE forward after
-an apply. **C6.3 — drawing the scene before it is simulated — is the one still
-open**, and it is the one with a real payoff: it would give the READER a visual
-check, which it has never had.
+**C6 is complete.** A Composition menu item that launches the app, a setting to
+read the comp on launch, a hand-off that brings AE forward after an apply, and
+the viewport drawing the comp as READ, before any physics runs. That last one
+gives the READER its first visual check: a comp whose polygons are misplaced no
+longer looks like a comp whose physics is wrong.
 
 **Open and waiting on a decision: C7, saving a sim with the project.** The
 question is not technical — see the plan.
@@ -315,7 +315,7 @@ reshapes the document model, not by popularity.
 ### C6 — launched from After Effects, requested 2026-09-10
 
 Requests that belong together, because each shortens the same distance between
-"I am in AE" and "I am looking at a simulation". **Two of three done, plus the
+"I am in AE" and "I am looking at a simulation". **All of it done, plus the
 hand-off.**
 
 - [x] **The hand-off after an apply. DONE** (2026-09-10). A clean apply asks AE
@@ -349,17 +349,70 @@ hand-off.**
       It deliberately does **not** auto-simulate: reading is free and safe,
       while simulating writes a bake over the last one, and doing that to
       somebody on launch is a way to lose work they had not applied yet.
-- [ ] **C6.3 — show the scene in the viewport before it is simulated.** ▶ **the one still open.** Today the
-      viewport draws from `render.json`, which only `b3_loop` produces, so
-      there is nothing to look at until a bake exists. To draw a comp as READ,
-      the geometry has to come out of the pipeline one step earlier — a render
-      model derived from the scene alone, with every layer at its resting
-      position. That is a small change to `--render-model` (it already writes
-      `rest` for pinned layers; this makes every layer have one) and a mode in
-      the app that draws a model with no bake. Worth doing: it turns the
-      viewport into a check on the READER, which currently has no visual
-      check at all, and B1's whole lesson was that a geometry bug looks like
-      nothing until you see it.
+- [x] **C6.3 — the scene in the viewport before it is simulated. DONE**
+      (2026-09-10). `--render-only` stops `b3_loop` after the geometry and
+      before the sim, and the viewport draws a model with no bake by putting
+      every layer at its resting pose. **It needed almost no new code, and
+      that is the finding**: the render model never read the bake for anything
+      but one redundant `static` flag, and `poseOf` already fell back to
+      `rest` because a pinned layer never gets keyframes. So "no bake at
+      all" is a case the front end already handled, for every layer at once.
+
+      **Why it is worth more than the convenience.** A comp whose polygons are
+      misplaced used to look exactly like a comp whose physics is wrong, and
+      those have completely different causes — B1 lost a sitting to that
+      confusion when A3's layer-space assumption turned out to be false in AE
+      and the only symptom was a bake that came out wrong. Now: if it looks
+      wrong before the sim, the solver is innocent. The READER has its first
+      visual check.
+
+      **The load-bearing check is that this is not a second drawing.**
+      `c2_render_model.py` section 6 measures the pre-sim model against the
+      one a full run writes — byte-identical, 4,366 bytes — with a control
+      that changes the scene and confirms the comparison can fail. 18/18.
+
+      Seen on a real comp: three layers at rest, convex-decomposition seams
+      visible, transport disabled rather than hidden because a greyed-out Play
+      says "nothing to play YET" and a missing one says the app forgot how.
+
+### Ship the Python with the plug-in, asked 2026-09-10
+
+Today the app asks for an interpreter and a folder, and both have already cost
+a sitting: `python` resolved to an install whose `pymunk` was in a
+per-user site-packages, and the failure surfaced as a solver traceback rather
+than as "your interpreter is not the one you think it is". Nobody but the
+author will ever configure this correctly.
+
+So the scripts and their dependencies should travel with the product, and the
+app should look in a place it already knows rather than one the user types.
+`%APPDATA%/Roaming/com.aldags.physics` is the natural home: the app's own
+data directory, writable without elevation, which is exactly what a folder
+beside the `.aex` in Program Files is not.
+
+**What this does NOT change, and the distinction matters.** The plug-in still
+does not learn where the executable is — the app registers itself, and that
+stays true because the AEGP and the app are installed by different mechanisms.
+This is about the app finding the SOLVER, which is a different problem with a
+different answer: the app ships it, so the app knows where it put it.
+
+Open: whether a configured path still overrides the bundled one. It should —
+the prototype folder is a working checkout for whoever is developing the
+solver, and a product that cannot be pointed at one is a product that cannot
+be debugged.
+
+### Rename to "Physics", asked 2026-09-10
+
+The app and the plug-in both become **Physics**, plain. `PhysBridge` names
+a spike that answered its question months ago, and the product is not a bridge.
+
+Not free, and worth listing before it is started: the `.aex` filename, the
+PiPL, the plug-in folder under Support Files, the pipe name, the preference
+section, the menu item, the Tauri identifier and therefore the settings
+directory itself. **The pipe name and the identifier are the two that break
+quietly** — an app and a plug-in that disagree about the pipe do not fail
+loudly, they simply never connect, and a changed identifier silently moves the
+settings folder and looks like every setting was forgotten. Both want doing in
+one commit, with a real connect afterwards, not reasoned about.
 
 ### C7 — a sim that belongs to a comp, asked 2026-09-10
 
