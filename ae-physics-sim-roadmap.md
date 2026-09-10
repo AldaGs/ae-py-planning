@@ -54,7 +54,7 @@ anyway, because the bake's `source` block describes the scene and the apply
 script can only see the comp. The shell now re-reads and compares hashes (C3,
 built and unit-tested, not yet exercised live).
 
-**C1 is closed, Wall I is spent and Wall K is guarded.** The one thing carried forward is a re-measurement: the apply's per-key figure was taken on a Debug `/Od` build and means nothing until it is read again off a Release one.
+**C1 is closed, Wall I is spent and Wall K is guarded.** The apply runs natively at **131.0 us/key, 28.6x faster than the ExtendScript path it replaced**, verified on a real comp against a Release build.
 
 **The next step is C2, the viewport.**
 
@@ -225,15 +225,34 @@ pipe transport.
       **5,412 ms** on the same key count: **14x wall-clock**, and that is the
       number that matters to a person waiting.
 
-      **The per-key figure did NOT match the projection, and the reason was the
-      build.** 262.4 us/key against C0.3's 117.7 — 2.2x the wrong way, on work
-      that should have been CHEAPER, since half of these keys are Rotation and
-      Rotation has no tangent pass at all. The `.aex` had been built
-      `Configuration=Debug`, which is `/Od`. Same trap as the 9.7x already on
-      record for a Release vcxproj with no `<Optimization>` element; here the
-      element was right and the CONFIGURATION was wrong, which no amount of
-      reading the vcxproj would have caught. **Re-measure on Release before
-      quoting any per-key number from this run.**
+      **RELEASE: 189 ms, 131.0 us/key. The Debug run was exactly 2x**, on both
+      the wall clock (380 -> 189) and the per-key figure (262.4 -> 131.0) — a
+      single consistent factor, which is what a correct diagnosis looks like.
+      **Against ExtendScript's 5,412 ms: 28.6x.**
+
+      The first measurement was taken on a `Configuration=Debug` build, which is
+      `/Od`: 262.4 us/key against C0.3's projected 117.7, which is 2.2x the
+      WRONG WAY on work that should have been cheaper, since half these keys are
+      Rotation and Rotation has no tangent pass. Same family as the 9.7x already
+      on record for a Release vcxproj with no `<Optimization>` element — but
+      here the element was RIGHT and the configuration was wrong, so reading the
+      vcxproj would have found nothing. What caught it was the direction: a
+      number merely worse than hoped invites a story, a number worse in an
+      impossible direction means the setup is wrong.
+
+      **131.0 against a projected 117.7 is not a miss.** C0.3 timed PHASES —
+      batch add, interpolation, tangents — on one solid's Position stream in a
+      scratch comp. This is the whole command's wall clock: file read, JSON
+      parse, the Wall K identity check, and stream get/dispose six times over.
+      A figure covering strictly more work came in 11% above one covering less,
+      so the projection held.
+
+      **Known and deliberately not fixed:** `JsonElem` walks the array from the
+      start on every index, so parsing a keyframe list is quadratic in keys PER
+      STREAM — the frame count, not the total. Negligible at 241 frames; a
+      3,000-frame comp makes the parse ~150x heavier. Pre-fracture does not
+      reach it (50 shards x 300 frames is 100 short streams, not one long one),
+      so the case that would justify an index is a very long comp.
 
       **The skipped auto-bezier pass holds.** No warning fired: the
       SPATIAL_AUTOBEZIER flag came back clear on every sampled key of a real
